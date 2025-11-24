@@ -188,6 +188,10 @@ class ReservationsStream(MewsChildStream):
             else:
                 start_date = start_date_str
 
+            # Ensure start_date is timezone-aware (convert naive to UTC)
+            if start_date.tzinfo is None:
+                start_date = start_date.replace(tzinfo=timezone.utc)
+
             # Use current time as end date (or you could make this configurable)
             end_date = datetime.now(timezone.utc)
 
