@@ -46,6 +46,12 @@ class TapMews(Tap):
             default="BBGMeltano 1.0.0",
             description="Client identifier sent with API requests",
         ),
+        th.Property(
+            "start_date",
+            th.DateTimeType,
+            required=True,
+            description="Start date for retrieving reservations (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)",
+        ),
     ).to_dict()
 
     def discover_streams(self) -> list[Stream]:
@@ -55,13 +61,14 @@ class TapMews(Tap):
             A list of stream instances.
         """
         return [
-            # Parent streams first
+            # Parent stream
             ServicesStream(self),
-            CustomersStream(self),
             # Child streams (depend on services)
             ResourceCategoriesStream(self),
             ResourcesStream(self),
             ReservationsStream(self),
+            # Customers is a child of reservations
+            CustomersStream(self),
         ]
 
 

@@ -165,6 +165,51 @@ class ReservationsStream(MewsChildStream):
         super().__init__(*args, **kwargs)
         self._current_customer_ids = []
 
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        """Prepare request payload with time interval filtering.
+
+        The reservations endpoint requires UpdatedUtc time interval
+        with a maximum of 3 months. We enforce this limit to avoid API errors.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        body = super().prepare_request_payload(context, next_page_token)
+
+        # Get start_date from config
+        start_date_str = self.config.get("start_date")
+        if start_date_str:
+            # Parse the start date
+            if isinstance(start_date_str, str):
+                start_date = datetime.fromisoformat(start_date_str.replace("Z", "+00:00"))
+            else:
+                start_date = start_date_str
+
+            # Use current time as end date (or you could make this configurable)
+            end_date = datetime.now(timezone.utc)
+
+            # Enforce 3-month maximum as per API limits
+            max_interval = timedelta(days=90)  # ~3 months
+            if (end_date - start_date) > max_interval:
+                # Cap the end date to 3 months from start
+                end_date = start_date + max_interval
+                self.logger.warning(
+                    f"Date range exceeds 3-month API limit. "
+                    f"Capping to {start_date.date()} - {end_date.date()}. "
+                    f"Use incremental sync for ongoing updates."
+                )
+
+            # Add UpdatedUtc time interval (API requires this for reservations)
+            body["UpdatedUtc"] = {
+                "StartUtc": start_date.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "EndUtc": end_date.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+
+        return body
+
     def parse_response(self, response):
         """Parse response and collect customer IDs from Customers array.
 

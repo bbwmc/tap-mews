@@ -32,3 +32,6 @@ plugins:
           kind: string
           value: BBGMeltano 1.0.0
           description: Client identifier sent with API requests
+        - name: start_date
+          kind: date_iso8601
+          description: Start date for retrieving reservations (ISO format YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)
