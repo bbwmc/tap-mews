@@ -52,12 +52,13 @@ class ResourceCategoriesStream(MewsChildStream):
     """Stream for resource categories (room types, etc.).
 
     Requires ServiceIds from parent services stream.
+    Note: This endpoint doesn't return UpdatedUtc, so no incremental sync.
     """
 
     name = "resource_categories"
     path = "/resourceCategories/getAll"
     primary_keys = ("Id",)
-    replication_key = "UpdatedUtc"
+    replication_key = None  # API doesn't return UpdatedUtc for this endpoint
     records_key = "ResourceCategories"
     parent_stream_type = ServicesStream
 
@@ -74,8 +75,6 @@ class ResourceCategoriesStream(MewsChildStream):
         th.Property("Capacity", th.IntegerType, description="Capacity"),
         th.Property("ExtraCapacity", th.IntegerType, description="Extra capacity"),
         th.Property("ExternalIdentifier", th.StringType, description="External ID"),
-        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
-        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
     ).to_dict()
 
 

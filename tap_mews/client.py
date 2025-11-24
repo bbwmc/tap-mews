@@ -6,6 +6,7 @@ and cursor-based pagination via the Limitation object.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 import requests
@@ -13,6 +14,8 @@ from singer_sdk.streams import RESTStream
 
 if TYPE_CHECKING:
     from singer_sdk import Tap
+
+logger = logging.getLogger(__name__)
 
 
 class MewsStream(RESTStream):
@@ -128,7 +131,8 @@ class MewsChildStream(MewsStream):
     """Base class for streams that depend on a parent service stream.
 
     Child streams are partitioned by service_id and require ServiceIds
-    in the request body.
+    in the request body. Some services (e.g., Orderable type) don't support
+    certain endpoints, so we handle 400 errors gracefully.
     """
 
     requires_service_id = True
@@ -145,3 +149,41 @@ class MewsChildStream(MewsStream):
     def get_child_context(self, record: dict, context: dict | None) -> dict | None:
         """Return context for child streams (not used for leaf streams)."""
         return None
+
+    def validate_response(self, response: requests.Response) -> None:
+        """Validate HTTP response, allowing 400 errors for unsupported services.
+
+        Some Mews service types (e.g., Orderable) don't support certain endpoints
+        like resourceCategories. The API returns 400 "Invalid ServiceIds" for these.
+        We skip these gracefully instead of failing.
+
+        Args:
+            response: The HTTP response object.
+
+        Raises:
+            FatalAPIError: For non-recoverable errors (except 400 for invalid services).
+        """
+        if response.status_code == 400:
+            try:
+                error_data = response.json()
+                if "Invalid ServiceIds" in error_data.get("Message", ""):
+                    # This service doesn't support this endpoint - skip silently
+                    logger.info(
+                        f"Service doesn't support {self.name} endpoint, skipping"
+                    )
+                    return
+            except Exception:
+                pass
+        # For all other cases, use default validation
+        super().validate_response(response)
+
+    def parse_response(self, response: requests.Response) -> list[dict]:
+        """Parse response, returning empty for 400 errors on unsupported services."""
+        if response.status_code == 400:
+            try:
+                error_data = response.json()
+                if "Invalid ServiceIds" in error_data.get("Message", ""):
+                    return  # Yield nothing for unsupported services
+            except Exception:
+                pass
+        yield from super().parse_response(response)
