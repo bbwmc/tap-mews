@@ -28,6 +28,9 @@ class MewsStream(RESTStream):
     records_jsonpath = "$[*]"  # Override in subclasses based on response structure
     page_size = 1000
 
+    # Override in child streams that need ServiceIds
+    requires_service_id: bool = False
+
     @property
     def url_base(self) -> str:
         """Return the base URL for the API."""
@@ -41,14 +44,19 @@ class MewsStream(RESTStream):
             "Accept": "application/json",
         }
 
-    def get_request_body(self, cursor: str | None = None) -> dict[str, Any]:
-        """Build the request body with authentication and pagination.
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        """Prepare the request payload for Mews API.
 
         Args:
-            cursor: Optional cursor for pagination.
+            context: Stream partition context (contains parent data like service_id).
+            next_page_token: Pagination cursor from previous response.
 
         Returns:
-            Dictionary containing the request body.
+            Request body dictionary.
         """
         body: dict[str, Any] = {
             "ClientToken": self.config["client_token"],
@@ -58,25 +66,15 @@ class MewsStream(RESTStream):
                 "Count": self.page_size,
             },
         }
-        if cursor:
-            body["Limitation"]["Cursor"] = cursor
+
+        if next_page_token:
+            body["Limitation"]["Cursor"] = next_page_token
+
+        # Add ServiceIds if this stream requires it and context has service_id
+        if self.requires_service_id and context and "service_id" in context:
+            body["ServiceIds"] = [context["service_id"]]
+
         return body
-
-    def prepare_request_payload(
-        self,
-        context: dict | None,
-        next_page_token: str | None,
-    ) -> dict | None:
-        """Prepare the request payload for Mews API.
-
-        Args:
-            context: Stream partition context.
-            next_page_token: Pagination cursor from previous response.
-
-        Returns:
-            Request body dictionary.
-        """
-        return self.get_request_body(cursor=next_page_token)
 
     def get_next_page_token(
         self,
@@ -124,3 +122,26 @@ class MewsStream(RESTStream):
     ) -> dict[str, Any]:
         """Return URL query parameters (empty for Mews, uses POST body)."""
         return {}
+
+
+class MewsChildStream(MewsStream):
+    """Base class for streams that depend on a parent service stream.
+
+    Child streams are partitioned by service_id and require ServiceIds
+    in the request body.
+    """
+
+    requires_service_id = True
+    parent_stream_type: type[MewsStream] | None = None  # Set in subclass
+
+    @property
+    def partitions(self) -> list[dict] | None:
+        """Return partitions for this stream based on parent services.
+
+        Returns None to let the SDK handle partitioning via parent_stream_type.
+        """
+        return None
+
+    def get_child_context(self, record: dict, context: dict | None) -> dict | None:
+        """Return context for child streams (not used for leaf streams)."""
+        return None

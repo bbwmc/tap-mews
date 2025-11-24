@@ -7,17 +7,59 @@ from __future__ import annotations
 
 from singer_sdk import typing as th
 
-from tap_mews.client import MewsStream
+from tap_mews.client import MewsChildStream, MewsStream
 
 
-class ResourceCategoriesStream(MewsStream):
-    """Stream for resource categories (room types, etc.)."""
+class ServicesStream(MewsStream):
+    """Stream for services (accommodation, spa, etc.).
+
+    This is a parent stream - child streams like resource_categories
+    and resources depend on it.
+    """
+
+    name = "services"
+    path = "/services/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "Services"
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Unique identifier"),
+        th.Property("EnterpriseId", th.StringType, description="Enterprise ID"),
+        th.Property("IsActive", th.BooleanType, description="Whether active"),
+        th.Property("Name", th.StringType, description="Service name"),
+        th.Property("Names", th.ObjectType(), description="Localized names"),
+        th.Property("ShortNames", th.ObjectType(), description="Localized short names"),
+        th.Property("Descriptions", th.ObjectType(), description="Localized descriptions"),
+        th.Property("StartTime", th.StringType, description="Start time"),
+        th.Property("EndTime", th.StringType, description="End time"),
+        th.Property("Type", th.StringType, description="Service type"),
+        th.Property("Ordering", th.IntegerType, description="Sort order"),
+        th.Property("Options", th.ObjectType(), description="Service options"),
+        th.Property("Promotions", th.ObjectType(), description="Service promotions"),
+        th.Property("Data", th.ObjectType(), description="Service data"),
+        th.Property("ExternalIdentifier", th.StringType, description="External ID"),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
+    ).to_dict()
+
+    def get_child_context(self, record: dict, context: dict | None) -> dict:
+        """Pass service_id to child streams."""
+        return {"service_id": record["Id"]}
+
+
+class ResourceCategoriesStream(MewsChildStream):
+    """Stream for resource categories (room types, etc.).
+
+    Requires ServiceIds from parent services stream.
+    """
 
     name = "resource_categories"
     path = "/resourceCategories/getAll"
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "ResourceCategories"
+    parent_stream_type = ServicesStream
 
     schema = th.PropertiesList(
         th.Property("Id", th.StringType, description="Unique identifier"),
@@ -37,14 +79,18 @@ class ResourceCategoriesStream(MewsStream):
     ).to_dict()
 
 
-class ResourcesStream(MewsStream):
-    """Stream for resources (rooms, parking spaces, etc.)."""
+class ResourcesStream(MewsChildStream):
+    """Stream for resources (rooms, parking spaces, etc.).
+
+    Requires ServiceIds from parent services stream.
+    """
 
     name = "resources"
     path = "/resources/getAll"
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "Resources"
+    parent_stream_type = ServicesStream
 
     schema = th.PropertiesList(
         th.Property("Id", th.StringType, description="Unique identifier"),
@@ -65,14 +111,18 @@ class ResourcesStream(MewsStream):
     ).to_dict()
 
 
-class ReservationsStream(MewsStream):
-    """Stream for reservations."""
+class ReservationsStream(MewsChildStream):
+    """Stream for reservations.
+
+    Requires ServiceIds from parent services stream.
+    """
 
     name = "reservations"
     path = "/reservations/getAll"
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "Reservations"
+    parent_stream_type = ServicesStream
 
     schema = th.PropertiesList(
         th.Property("Id", th.StringType, description="Unique identifier"),
@@ -112,7 +162,10 @@ class ReservationsStream(MewsStream):
 
 
 class CustomersStream(MewsStream):
-    """Stream for customers (guests)."""
+    """Stream for customers (guests).
+
+    This stream does not require ServiceIds.
+    """
 
     name = "customers"
     path = "/customers/getAll"
@@ -150,33 +203,4 @@ class CustomersStream(MewsStream):
         th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
         th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
         th.Property("ActivityState", th.StringType, description="Activity state"),
-    ).to_dict()
-
-
-class ServicesStream(MewsStream):
-    """Stream for services (accommodation, spa, etc.)."""
-
-    name = "services"
-    path = "/services/getAll"
-    primary_keys = ("Id",)
-    replication_key = "UpdatedUtc"
-    records_key = "Services"
-
-    schema = th.PropertiesList(
-        th.Property("Id", th.StringType, description="Unique identifier"),
-        th.Property("EnterpriseId", th.StringType, description="Enterprise ID"),
-        th.Property("IsActive", th.BooleanType, description="Whether active"),
-        th.Property("Name", th.StringType, description="Service name"),
-        th.Property("Names", th.ObjectType(), description="Localized names"),
-        th.Property("ShortNames", th.ObjectType(), description="Localized short names"),
-        th.Property("Descriptions", th.ObjectType(), description="Localized descriptions"),
-        th.Property("StartTime", th.StringType, description="Start time"),
-        th.Property("EndTime", th.StringType, description="End time"),
-        th.Property("Type", th.StringType, description="Service type"),
-        th.Property("Ordering", th.IntegerType, description="Sort order"),
-        th.Property("Options", th.ObjectType(), description="Service options"),
-        th.Property("Data", th.ObjectType(), description="Service data"),
-        th.Property("ExternalIdentifier", th.StringType, description="External ID"),
-        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
-        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
     ).to_dict()
