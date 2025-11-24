@@ -1,0 +1,34 @@
+version: 1
+default_environment: dev
+project_id: tap-mews
+
+environments:
+  - name: dev
+  - name: staging
+  - name: prod
+
+plugins:
+  extractors:
+    - name: tap-mews
+      namespace: tap_mews
+      pip_url: -e .
+      executable: tap-mews
+      capabilities:
+        - state
+        - catalog
+        - discover
+      settings:
+        - name: client_token
+          kind: password
+          description: Mews API Client Token
+        - name: access_token
+          kind: password
+          description: Mews API Access Token
+        - name: api_url
+          kind: string
+          value: https://api.mews.com
+          description: Mews API base URL
+        - name: client_name
+          kind: string
+          value: BBGMeltano 1.0.0
+          description: Client identifier sent with API requests

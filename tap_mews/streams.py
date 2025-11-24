@@ -1,0 +1,182 @@
+"""Stream classes for tap-mews.
+
+Each stream corresponds to a Mews API endpoint.
+"""
+
+from __future__ import annotations
+
+from singer_sdk import typing as th
+
+from tap_mews.client import MewsStream
+
+
+class ResourceCategoriesStream(MewsStream):
+    """Stream for resource categories (room types, etc.)."""
+
+    name = "resource_categories"
+    path = "/resourceCategories/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "ResourceCategories"
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Unique identifier"),
+        th.Property("EnterpriseId", th.StringType, description="Enterprise ID"),
+        th.Property("ServiceId", th.StringType, description="Service ID"),
+        th.Property("IsActive", th.BooleanType, description="Whether active"),
+        th.Property("Type", th.StringType, description="Category type"),
+        th.Property("Names", th.ObjectType(), description="Localized names"),
+        th.Property("ShortNames", th.ObjectType(), description="Localized short names"),
+        th.Property("Descriptions", th.ObjectType(), description="Localized descriptions"),
+        th.Property("Ordering", th.IntegerType, description="Sort order"),
+        th.Property("Capacity", th.IntegerType, description="Capacity"),
+        th.Property("ExtraCapacity", th.IntegerType, description="Extra capacity"),
+        th.Property("ExternalIdentifier", th.StringType, description="External ID"),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
+    ).to_dict()
+
+
+class ResourcesStream(MewsStream):
+    """Stream for resources (rooms, parking spaces, etc.)."""
+
+    name = "resources"
+    path = "/resources/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "Resources"
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Unique identifier"),
+        th.Property("EnterpriseId", th.StringType, description="Enterprise ID"),
+        th.Property("ServiceId", th.StringType, description="Service ID"),
+        th.Property("ResourceCategoryId", th.StringType, description="Resource category ID"),
+        th.Property("IsActive", th.BooleanType, description="Whether active"),
+        th.Property("Name", th.StringType, description="Resource name"),
+        th.Property("ParentResourceId", th.StringType, description="Parent resource ID"),
+        th.Property("State", th.StringType, description="Current state"),
+        th.Property("StateReason", th.StringType, description="State reason"),
+        th.Property("Descriptions", th.ObjectType(), description="Localized descriptions"),
+        th.Property("FloorNumber", th.StringType, description="Floor number"),
+        th.Property("BuildingNumber", th.StringType, description="Building number"),
+        th.Property("ExternalIdentifier", th.StringType, description="External ID"),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
+    ).to_dict()
+
+
+class ReservationsStream(MewsStream):
+    """Stream for reservations."""
+
+    name = "reservations"
+    path = "/reservations/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "Reservations"
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Unique identifier"),
+        th.Property("ServiceId", th.StringType, description="Service ID"),
+        th.Property("AccountId", th.StringType, description="Account ID"),
+        th.Property("AccountType", th.StringType, description="Account type"),
+        th.Property("BookerId", th.StringType, description="Booker ID"),
+        th.Property("StartUtc", th.DateTimeType, description="Start timestamp"),
+        th.Property("EndUtc", th.DateTimeType, description="End timestamp"),
+        th.Property("ReleasedUtc", th.DateTimeType, description="Released timestamp"),
+        th.Property("CancelledUtc", th.DateTimeType, description="Cancelled timestamp"),
+        th.Property("RequestedResourceCategoryId", th.StringType, description="Requested category"),
+        th.Property("AssignedResourceId", th.StringType, description="Assigned resource ID"),
+        th.Property("AssignedResourceLocked", th.BooleanType, description="Resource locked"),
+        th.Property("BusinessSegmentId", th.StringType, description="Business segment ID"),
+        th.Property("CompanyId", th.StringType, description="Company ID"),
+        th.Property("TravelAgencyId", th.StringType, description="Travel agency ID"),
+        th.Property("AvailabilityBlockId", th.StringType, description="Availability block ID"),
+        th.Property("RateId", th.StringType, description="Rate ID"),
+        th.Property("VoucherId", th.StringType, description="Voucher ID"),
+        th.Property("CreditCardId", th.StringType, description="Credit card ID"),
+        th.Property("GroupId", th.StringType, description="Reservation group ID"),
+        th.Property("Number", th.StringType, description="Confirmation number"),
+        th.Property("ChannelNumber", th.StringType, description="Channel confirmation number"),
+        th.Property("ChannelManagerNumber", th.StringType, description="Channel manager number"),
+        th.Property("ChannelManagerGroupNumber", th.StringType, description="Channel manager group"),
+        th.Property("ChannelManager", th.StringType, description="Channel manager name"),
+        th.Property("State", th.StringType, description="Reservation state"),
+        th.Property("Origin", th.StringType, description="Origin of reservation"),
+        th.Property("OriginDetails", th.StringType, description="Origin details"),
+        th.Property("Purpose", th.StringType, description="Purpose of stay"),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
+        th.Property("CancellationReason", th.StringType, description="Cancellation reason"),
+        th.Property("Options", th.ObjectType(), description="Reservation options"),
+    ).to_dict()
+
+
+class CustomersStream(MewsStream):
+    """Stream for customers (guests)."""
+
+    name = "customers"
+    path = "/customers/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "Customers"
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Unique identifier"),
+        th.Property("EnterpriseId", th.StringType, description="Enterprise ID"),
+        th.Property("ChainId", th.StringType, description="Chain ID"),
+        th.Property("Number", th.StringType, description="Customer number"),
+        th.Property("Title", th.StringType, description="Title"),
+        th.Property("Sex", th.StringType, description="Sex"),
+        th.Property("FirstName", th.StringType, description="First name"),
+        th.Property("LastName", th.StringType, description="Last name"),
+        th.Property("SecondLastName", th.StringType, description="Second last name"),
+        th.Property("NationalityCode", th.StringType, description="Nationality code"),
+        th.Property("LanguageCode", th.StringType, description="Language code"),
+        th.Property("BirthDate", th.StringType, description="Birth date"),
+        th.Property("BirthPlace", th.StringType, description="Birth place"),
+        th.Property("Email", th.StringType, description="Email address"),
+        th.Property("Phone", th.StringType, description="Phone number"),
+        th.Property("TaxIdentificationNumber", th.StringType, description="Tax ID"),
+        th.Property("LoyaltyCode", th.StringType, description="Loyalty code"),
+        th.Property("AccountingCode", th.StringType, description="Accounting code"),
+        th.Property("BillingCode", th.StringType, description="Billing code"),
+        th.Property("Notes", th.StringType, description="Notes"),
+        th.Property("CarRegistrationNumber", th.StringType, description="Car registration"),
+        th.Property("DietaryRequirements", th.StringType, description="Dietary requirements"),
+        th.Property("CompanyId", th.StringType, description="Company ID"),
+        th.Property("Classifications", th.ArrayType(th.StringType), description="Classifications"),
+        th.Property("Options", th.ArrayType(th.StringType), description="Options"),
+        th.Property("Address", th.ObjectType(), description="Address object"),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
+        th.Property("ActivityState", th.StringType, description="Activity state"),
+    ).to_dict()
+
+
+class ServicesStream(MewsStream):
+    """Stream for services (accommodation, spa, etc.)."""
+
+    name = "services"
+    path = "/services/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "Services"
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Unique identifier"),
+        th.Property("EnterpriseId", th.StringType, description="Enterprise ID"),
+        th.Property("IsActive", th.BooleanType, description="Whether active"),
+        th.Property("Name", th.StringType, description="Service name"),
+        th.Property("Names", th.ObjectType(), description="Localized names"),
+        th.Property("ShortNames", th.ObjectType(), description="Localized short names"),
+        th.Property("Descriptions", th.ObjectType(), description="Localized descriptions"),
+        th.Property("StartTime", th.StringType, description="Start time"),
+        th.Property("EndTime", th.StringType, description="End time"),
+        th.Property("Type", th.StringType, description="Service type"),
+        th.Property("Ordering", th.IntegerType, description="Sort order"),
+        th.Property("Options", th.ObjectType(), description="Service options"),
+        th.Property("Data", th.ObjectType(), description="Service data"),
+        th.Property("ExternalIdentifier", th.StringType, description="External ID"),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
+    ).to_dict()
