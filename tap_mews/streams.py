@@ -114,6 +114,7 @@ class ReservationsStream(MewsChildStream):
     """Stream for reservations.
 
     Requires ServiceIds from parent services stream.
+    This is also a parent stream - customers stream depends on it.
     """
 
     name = "reservations"
@@ -159,11 +160,43 @@ class ReservationsStream(MewsChildStream):
         th.Property("Options", th.ObjectType(), description="Reservation options"),
     ).to_dict()
 
+    def __init__(self, *args, **kwargs):
+        """Initialize and set up customer IDs collection."""
+        super().__init__(*args, **kwargs)
+        self._current_customer_ids = []
 
-class CustomersStream(MewsStream):
+    def parse_response(self, response):
+        """Parse response and collect customer IDs from Customers array.
+
+        The reservations API returns both Reservations and Customers arrays.
+        We collect customer IDs here to pass to child streams.
+        """
+        data = response.json()
+
+        # Collect customer IDs from the Customers array
+        self._current_customer_ids = []
+        if "Customers" in data and data["Customers"]:
+            self._current_customer_ids = [c["Id"] for c in data["Customers"] if "Id" in c]
+
+        # Yield reservations as normal
+        yield from super().parse_response(response)
+
+    def get_child_context(self, record: dict, context: dict | None) -> dict:
+        """Pass customer IDs to child streams.
+
+        Returns customer IDs collected from the Customers array in the API response.
+        """
+        return {
+            "customer_ids": self._current_customer_ids,
+            "service_id": context.get("service_id") if context else None,
+        }
+
+
+class CustomersStream(MewsChildStream):
     """Stream for customers (guests).
 
-    This stream does not require ServiceIds.
+    Child of ReservationsStream - uses customer IDs from reservations response
+    to query the customers endpoint with CustomerIds filter.
     """
 
     name = "customers"
@@ -171,6 +204,8 @@ class CustomersStream(MewsStream):
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "Customers"
+    parent_stream_type = ReservationsStream
+    requires_service_id = False  # Customers endpoint doesn't use ServiceIds
 
     schema = th.PropertiesList(
         th.Property("Id", th.StringType, description="Unique identifier"),
@@ -203,3 +238,27 @@ class CustomersStream(MewsStream):
         th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
         th.Property("ActivityState", th.StringType, description="Activity state"),
     ).to_dict()
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        """Prepare request payload with CustomerIds filter.
+
+        The customers endpoint requires at least one filter. We use CustomerIds
+        from the parent reservations response.
+        """
+        body = super().prepare_request_payload(context, next_page_token)
+
+        # Add CustomerIds filter from context
+        if context and "customer_ids" in context and context["customer_ids"]:
+            body["CustomerIds"] = context["customer_ids"]
+        else:
+            # If no customer IDs, skip this request
+            return None
+
+        # Remove ServiceIds as customers endpoint doesn't use it
+        body.pop("ServiceIds", None)
+
+        return body
