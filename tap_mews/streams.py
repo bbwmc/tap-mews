@@ -221,7 +221,13 @@ class ReservationsStream(MewsChildStream):
             self.logger.info(
                 f"Querying reservations with UpdatedUtc: {start_utc} to {end_utc}"
             )
-            self.logger.debug(f"Full request body: {body}")
+
+        # Log the full request body (masking sensitive data)
+        import json
+        safe_body = {k: v for k, v in body.items() if k not in ["ClientToken", "AccessToken"]}
+        safe_body["ClientToken"] = "***"
+        safe_body["AccessToken"] = "***"
+        self.logger.info(f"Full reservations request body: {json.dumps(safe_body, indent=2)}")
 
         return body
 
