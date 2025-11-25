@@ -484,12 +484,7 @@ class BillsStream(MewsChildStream):
         th.Property("Type", th.StringType, description="Bill type (Receipt or Invoice)"),
         th.Property("CorrectionState", th.StringType, description="Correction state"),
         th.Property("Notes", th.StringType, description="Notes"),
-        th.Property("Revenue", th.ObjectType(
-            th.Property("Currency", th.StringType),
-            th.Property("NetValue", th.NumberType),
-            th.Property("GrossValue", th.NumberType),
-            th.Property("TaxValues", th.ArrayType(th.ObjectType())),
-        ), description="Revenue amounts"),
+        th.Property("Revenue", th.CustomType({"type": ["object", "array", "null"]}), description="Revenue amounts (can be object or empty array)"),
         th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
         th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
         th.Property("IssuedUtc", th.DateTimeType, description="Issued timestamp"),
