@@ -498,6 +498,10 @@ class BillsStream(MewsChildStream):
         th.Property("CounterId", th.StringType, description="Counter ID"),
     ).to_dict()
 
+    def get_child_context(self, record: dict, context: dict | None) -> dict:
+        """Pass bill_id to child streams (Payments)."""
+        return {"bill_id": record["Id"]}
+
     def prepare_request_payload(
         self,
         context: dict | None,
@@ -506,6 +510,97 @@ class BillsStream(MewsChildStream):
         """Prepare request payload with BillIds filter.
 
         Bills are queried using BillIds from parent order items.
+        We override the default ServiceIds logic from MewsChildStream.
+        """
+        # Start with base payload (ClientToken, AccessToken, Client, Limitation)
+        body = {
+            "ClientToken": self.config["client_token"],
+            "AccessToken": self.config["access_token"],
+            "Client": self.config.get("client_name", "BBGMeltano 1.0.0"),
+            "Limitation": {
+                "Count": self.page_size,
+            },
+        }
+
+        if next_page_token:
+            body["Limitation"]["Cursor"] = next_page_token
+
+        # Add BillIds filter (bill IDs from parent context)
+        if context and "bill_id" in context:
+            body["BillIds"] = [context["bill_id"]]
+
+        return body
+
+
+class PaymentsStream(MewsChildStream):
+    """Stream for payments.
+
+    Child stream of Bills - uses BillIds to query payments for bills.
+    """
+
+    name = "payments"
+    path = "/payments/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "Payments"
+    parent_stream_type = BillsStream
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Unique identifier"),
+        th.Property("EnterpriseId", th.StringType, description="Enterprise ID"),
+        th.Property("AccountId", th.StringType, description="Account ID"),
+        th.Property("AccountType", th.StringType, description="Account type"),
+        th.Property("BillId", th.StringType, description="Bill ID"),
+        th.Property("ReservationId", th.StringType, description="Reservation ID"),
+        th.Property("AccountingCategoryId", th.StringType, description="Accounting category ID"),
+        th.Property("Amount", th.ObjectType(
+            th.Property("Currency", th.StringType),
+            th.Property("NetValue", th.NumberType),
+            th.Property("GrossValue", th.NumberType),
+            th.Property("TaxValues", th.ArrayType(th.ObjectType())),
+            th.Property("Breakdown", th.ObjectType()),
+        ), description="Payment amount"),
+        th.Property("OriginalAmount", th.ObjectType(
+            th.Property("Currency", th.StringType),
+            th.Property("NetValue", th.NumberType),
+            th.Property("GrossValue", th.NumberType),
+            th.Property("TaxValues", th.ArrayType(th.ObjectType())),
+            th.Property("Breakdown", th.ObjectType()),
+        ), description="Original payment amount"),
+        th.Property("Notes", th.StringType, description="Notes"),
+        th.Property("SettlementId", th.StringType, description="Settlement ID"),
+        th.Property("ConsumedUtc", th.DateTimeType, description="Consumed timestamp"),
+        th.Property("ClosedUtc", th.DateTimeType, description="Closed timestamp"),
+        th.Property("ChargedUtc", th.DateTimeType, description="Charged timestamp"),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
+        th.Property("SettlementUtc", th.DateTimeType, description="Settlement timestamp"),
+        th.Property("AccountingState", th.StringType, description="Accounting state"),
+        th.Property("State", th.StringType, description="Payment state"),
+        th.Property("Identifier", th.StringType, description="Payment identifier"),
+        th.Property("Type", th.StringType, description="Payment type"),
+        th.Property("Kind", th.StringType, description="Payment kind"),
+        th.Property("Data", th.ObjectType(
+            th.Property("Discriminator", th.StringType),
+            th.Property("CreditCard", th.ObjectType()),
+            th.Property("Invoice", th.ObjectType()),
+            th.Property("External", th.ObjectType(
+                th.Property("Type", th.StringType),
+                th.Property("ExternalIdentifier", th.StringType),
+            )),
+            th.Property("Ghost", th.ObjectType()),
+        ), description="Payment data"),
+        th.Property("PaymentOrigin", th.StringType, description="Payment origin"),
+    ).to_dict()
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        """Prepare request payload with BillIds filter.
+
+        Payments are queried using BillIds from parent bills.
         We override the default ServiceIds logic from MewsChildStream.
         """
         # Start with base payload (ClientToken, AccessToken, Client, Limitation)

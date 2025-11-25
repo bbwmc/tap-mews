@@ -9,6 +9,7 @@ from tap_mews.streams import (
     BillsStream,
     CustomersStream,
     OrderItemsStream,
+    PaymentsStream,
     ReservationsStream,
     ResourceCategoriesStream,
     ResourcesStream,
@@ -80,6 +81,8 @@ class TapMews(Tap):
             OrderItemsStream(self),
             # Order Item-dependent child streams
             BillsStream(self),
+            # Bill-dependent child streams
+            PaymentsStream(self),
         ]
 
 
