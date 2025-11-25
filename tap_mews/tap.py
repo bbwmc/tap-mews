@@ -6,7 +6,9 @@ from singer_sdk import Stream, Tap
 from singer_sdk import typing as th
 
 from tap_mews.streams import (
+    BillsStream,
     CustomersStream,
+    OrderItemsStream,
     ReservationsStream,
     ResourceCategoriesStream,
     ResourcesStream,
@@ -52,6 +54,12 @@ class TapMews(Tap):
             required=True,
             description="Start date for retrieving reservations (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)",
         ),
+        th.Property(
+            "enterprise_ids",
+            th.ArrayType(th.StringType),
+            required=False,
+            description="List of Enterprise IDs to query (used for reservations and other enterprise-scoped endpoints)",
+        ),
     ).to_dict()
 
     def discover_streams(self) -> list[Stream]:
@@ -61,13 +69,17 @@ class TapMews(Tap):
             A list of stream instances.
         """
         return [
-            # Parent streams
+            # Independent parent streams
             ServicesStream(self),
             CustomersStream(self),
-            # Child streams (depend on services)
+            ReservationsStream(self),
+            # Service-dependent child streams
             ResourceCategoriesStream(self),
             ResourcesStream(self),
-            ReservationsStream(self),
+            # Reservation-dependent child streams
+            OrderItemsStream(self),
+            # Order Item-dependent child streams
+            BillsStream(self),
         ]
 
 

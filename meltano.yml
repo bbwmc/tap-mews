@@ -35,3 +35,6 @@ plugins:
         - name: start_date
           kind: date_iso8601
           description: Start date for retrieving reservations (ISO format YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)
+        - name: enterprise_ids
+          kind: array
+          description: List of Enterprise IDs to query (used for reservations and other enterprise-scoped endpoints)

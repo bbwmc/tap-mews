@@ -110,10 +110,10 @@ class ResourcesStream(MewsChildStream):
     ).to_dict()
 
 
-class ReservationsStream(MewsChildStream):
+class ReservationsStream(MewsStream):
     """Stream for reservations.
 
-    Requires ServiceIds from parent services stream.
+    Independent stream that queries all reservations using EnterpriseIds.
     """
 
     name = "reservations"
@@ -121,7 +121,6 @@ class ReservationsStream(MewsChildStream):
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "Reservations"
-    parent_stream_type = ServicesStream
 
     schema = th.PropertiesList(
         th.Property("Id", th.StringType, description="Unique identifier"),
@@ -159,6 +158,10 @@ class ReservationsStream(MewsChildStream):
         th.Property("Options", th.ObjectType(), description="Reservation options"),
     ).to_dict()
 
+    def get_child_context(self, record: dict, context: dict | None) -> dict:
+        """Pass reservation_id to child streams (Order Items)."""
+        return {"reservation_id": record["Id"]}
+
     def prepare_request_payload(
         self,
         context: dict | None,
@@ -172,6 +175,11 @@ class ReservationsStream(MewsChildStream):
         from datetime import datetime, timedelta, timezone
 
         body = super().prepare_request_payload(context, next_page_token)
+
+        # Add EnterpriseIds filter (required for querying all reservations)
+        enterprise_ids = self.config.get("enterprise_ids")
+        if enterprise_ids:
+            body["EnterpriseIds"] = enterprise_ids if isinstance(enterprise_ids, list) else [enterprise_ids]
 
         # Get start_date from config
         start_date_str = self.config.get("start_date")
@@ -333,5 +341,193 @@ class CustomersStream(MewsStream):
         safe_body["ClientToken"] = "***"
         safe_body["AccessToken"] = "***"
         self.logger.info(f"Full customers request body: {json.dumps(safe_body, indent=2)}")
+
+        return body
+
+
+class OrderItemsStream(MewsChildStream):
+    """Stream for order items.
+
+    Child stream of Reservations - uses ServiceOrderIds (reservation IDs) to query order items.
+    """
+
+    name = "order_items"
+    path = "/orderItems/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "OrderItems"
+    parent_stream_type = ReservationsStream
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Unique identifier"),
+        th.Property("EnterpriseId", th.StringType, description="Enterprise ID"),
+        th.Property("AccountId", th.StringType, description="Account ID"),
+        th.Property("AccountType", th.StringType, description="Account type"),
+        th.Property("ServiceId", th.StringType, description="Service ID"),
+        th.Property("ServiceOrderId", th.StringType, description="Service order ID (reservation ID)"),
+        th.Property("Notes", th.StringType, description="Notes"),
+        th.Property("BillId", th.StringType, description="Bill ID"),
+        th.Property("AccountingCategoryId", th.StringType, description="Accounting category ID"),
+        th.Property("BillingName", th.StringType, description="Billing name"),
+        th.Property("ExternalIdentifier", th.StringType, description="External identifier"),
+        th.Property("UnitCount", th.IntegerType, description="Unit count"),
+        th.Property("UnitAmount", th.ObjectType(
+            th.Property("Currency", th.StringType),
+            th.Property("NetValue", th.NumberType),
+            th.Property("GrossValue", th.NumberType),
+            th.Property("TaxValues", th.ArrayType(th.ObjectType())),
+            th.Property("Breakdown", th.ObjectType()),
+        ), description="Unit amount"),
+        th.Property("Amount", th.ObjectType(
+            th.Property("Currency", th.StringType),
+            th.Property("NetValue", th.NumberType),
+            th.Property("GrossValue", th.NumberType),
+            th.Property("TaxValues", th.ArrayType(th.ObjectType())),
+            th.Property("Breakdown", th.ObjectType()),
+        ), description="Total amount"),
+        th.Property("OriginalAmount", th.ObjectType(
+            th.Property("Currency", th.StringType),
+            th.Property("NetValue", th.NumberType),
+            th.Property("GrossValue", th.NumberType),
+            th.Property("TaxValues", th.ArrayType(th.ObjectType())),
+            th.Property("Breakdown", th.ObjectType()),
+        ), description="Original amount"),
+        th.Property("RevenueType", th.StringType, description="Revenue type"),
+        th.Property("CreatorProfileId", th.StringType, description="Creator profile ID"),
+        th.Property("UpdaterProfileId", th.StringType, description="Updater profile ID"),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
+        th.Property("ConsumedUtc", th.DateTimeType, description="Consumption timestamp"),
+        th.Property("CanceledUtc", th.DateTimeType, description="Cancellation timestamp"),
+        th.Property("ClosedUtc", th.DateTimeType, description="Closed timestamp"),
+        th.Property("StartUtc", th.DateTimeType, description="Start timestamp"),
+        th.Property("ClaimedUtc", th.DateTimeType, description="Claimed timestamp"),
+        th.Property("AccountingState", th.StringType, description="Accounting state"),
+        th.Property("Type", th.StringType, description="Order item type"),
+        th.Property("Options", th.ObjectType(), description="Options"),
+        th.Property("Data", th.ObjectType(
+            th.Property("Discriminator", th.StringType),
+            th.Property("Rebate", th.ObjectType()),
+            th.Property("Product", th.ObjectType(
+                th.Property("ProductId", th.StringType),
+                th.Property("AgeCategoryId", th.StringType),
+                th.Property("ProductType", th.StringType),
+            )),
+            th.Property("AllowanceDiscount", th.ObjectType()),
+            th.Property("AllowanceProfits", th.ObjectType()),
+        ), description="Order item data"),
+        th.Property("TaxExemptionReason", th.StringType, description="Tax exemption reason"),
+        th.Property("TaxExemptionLegalReference", th.StringType, description="Tax exemption legal reference"),
+    ).to_dict()
+
+    def get_child_context(self, record: dict, context: dict | None) -> dict | None:
+        """Pass bill_id to child streams (Bills).
+
+        Only returns context if the order item has a BillId.
+        """
+        bill_id = record.get("BillId")
+        if bill_id:
+            return {"bill_id": bill_id}
+        return None
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        """Prepare request payload with ServiceOrderIds filter.
+
+        Order items are queried using ServiceOrderIds (reservation IDs from parent).
+        We override the default ServiceIds logic from MewsChildStream.
+        """
+        # Start with base payload (ClientToken, AccessToken, Client, Limitation)
+        body = {
+            "ClientToken": self.config["client_token"],
+            "AccessToken": self.config["access_token"],
+            "Client": self.config.get("client_name", "BBGMeltano 1.0.0"),
+            "Limitation": {
+                "Count": self.page_size,
+            },
+        }
+
+        if next_page_token:
+            body["Limitation"]["Cursor"] = next_page_token
+
+        # Add ServiceOrderIds filter (reservation IDs from parent context)
+        if context and "reservation_id" in context:
+            body["ServiceOrderIds"] = [context["reservation_id"]]
+
+        return body
+
+
+class BillsStream(MewsChildStream):
+    """Stream for bills.
+
+    Child stream of Order Items - uses BillIds to query bill details.
+    """
+
+    name = "bills"
+    path = "/bills/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "Bills"
+    parent_stream_type = OrderItemsStream
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Unique identifier"),
+        th.Property("EnterpriseId", th.StringType, description="Enterprise ID"),
+        th.Property("AccountId", th.StringType, description="Account ID"),
+        th.Property("AccountType", th.StringType, description="Account type"),
+        th.Property("Name", th.StringType, description="Bill name"),
+        th.Property("Number", th.StringType, description="Bill number"),
+        th.Property("State", th.StringType, description="Bill state"),
+        th.Property("Type", th.StringType, description="Bill type (Receipt or Invoice)"),
+        th.Property("CorrectionState", th.StringType, description="Correction state"),
+        th.Property("Notes", th.StringType, description="Notes"),
+        th.Property("Revenue", th.ObjectType(
+            th.Property("Currency", th.StringType),
+            th.Property("NetValue", th.NumberType),
+            th.Property("GrossValue", th.NumberType),
+            th.Property("TaxValues", th.ArrayType(th.ObjectType())),
+        ), description="Revenue amounts"),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
+        th.Property("IssuedUtc", th.DateTimeType, description="Issued timestamp"),
+        th.Property("PaidUtc", th.DateTimeType, description="Paid timestamp"),
+        th.Property("DueUtc", th.DateTimeType, description="Due timestamp"),
+        th.Property("TaxedUtc", th.DateTimeType, description="Taxed timestamp"),
+        th.Property("Options", th.ObjectType(), description="Bill options"),
+        th.Property("OriginBillId", th.StringType, description="Origin bill ID (for corrections)"),
+        th.Property("CompanyId", th.StringType, description="Company ID"),
+        th.Property("CustomerId", th.StringType, description="Customer ID"),
+        th.Property("CounterId", th.StringType, description="Counter ID"),
+    ).to_dict()
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        """Prepare request payload with BillIds filter.
+
+        Bills are queried using BillIds from parent order items.
+        We override the default ServiceIds logic from MewsChildStream.
+        """
+        # Start with base payload (ClientToken, AccessToken, Client, Limitation)
+        body = {
+            "ClientToken": self.config["client_token"],
+            "AccessToken": self.config["access_token"],
+            "Client": self.config.get("client_name", "BBGMeltano 1.0.0"),
+            "Limitation": {
+                "Count": self.page_size,
+            },
+        }
+
+        if next_page_token:
+            body["Limitation"]["Cursor"] = next_page_token
+
+        # Add BillIds filter (bill IDs from parent context)
+        if context and "bill_id" in context:
+            body["BillIds"] = [context["bill_id"]]
 
         return body
