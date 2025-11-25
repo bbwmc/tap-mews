@@ -118,7 +118,7 @@ class ReservationsStream(MewsChildStream):
     """
 
     name = "reservations"
-    path = "/reservations/getAll"
+    path = "/reservations/getAll/2023-06-06"
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "Reservations"
