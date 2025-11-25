@@ -320,11 +320,20 @@ class CustomersStream(MewsChildStream):
         # Add CustomerIds filter from context
         if context and "customer_ids" in context and context["customer_ids"]:
             body["CustomerIds"] = context["customer_ids"]
+            self.logger.info(f"Querying customers with {len(context['customer_ids'])} customer IDs")
         else:
             # If no customer IDs, skip this request
+            self.logger.info("No customer IDs found in context, skipping customers request")
             return None
 
         # Remove ServiceIds as customers endpoint doesn't use it
         body.pop("ServiceIds", None)
+
+        # Log the full request body (masking sensitive data)
+        import json
+        safe_body = {k: v for k, v in body.items() if k not in ["ClientToken", "AccessToken"]}
+        safe_body["ClientToken"] = "***"
+        safe_body["AccessToken"] = "***"
+        self.logger.info(f"Full customers request body: {json.dumps(safe_body, indent=2)}")
 
         return body
