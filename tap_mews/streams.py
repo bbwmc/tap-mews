@@ -182,8 +182,9 @@ class ReservationsStream(MewsChildStream):
         # Get start_date from config
         start_date_str = self.config.get("start_date")
         if start_date_str:
-            # Parse the start date
+            # Parse the start date - handle both date-only and datetime formats
             if isinstance(start_date_str, str):
+                # datetime.fromisoformat handles both YYYY-MM-DD and full ISO formats
                 start_date = datetime.fromisoformat(start_date_str.replace("Z", "+00:00"))
             else:
                 start_date = start_date_str
@@ -206,11 +207,21 @@ class ReservationsStream(MewsChildStream):
                     f"Use incremental sync for ongoing updates."
                 )
 
+            # Format dates as ISO 8601 with Z suffix (required by Mews API)
+            # Use timespec='seconds' to avoid microseconds in the output
+            start_utc = start_date.isoformat(timespec='seconds').replace("+00:00", "Z")
+            end_utc = end_date.isoformat(timespec='seconds').replace("+00:00", "Z")
+
             # Add UpdatedUtc time interval (API requires this for reservations)
             body["UpdatedUtc"] = {
-                "StartUtc": start_date.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "EndUtc": end_date.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "StartUtc": start_utc,
+                "EndUtc": end_utc,
             }
+
+            self.logger.info(
+                f"Querying reservations with UpdatedUtc: {start_utc} to {end_utc}"
+            )
+            self.logger.debug(f"Full request body: {body}")
 
         return body
 
