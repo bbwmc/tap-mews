@@ -61,14 +61,13 @@ class TapMews(Tap):
             A list of stream instances.
         """
         return [
-            # Parent stream
+            # Parent streams
             ServicesStream(self),
+            CustomersStream(self),
             # Child streams (depend on services)
             ResourceCategoriesStream(self),
             ResourcesStream(self),
             ReservationsStream(self),
-            # Customers is a child of reservations
-            CustomersStream(self),
         ]
 
 

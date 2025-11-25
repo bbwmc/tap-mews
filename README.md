@@ -7,15 +7,15 @@ Singer tap for [Mews PMS API](https://mews-systems.gitbook.io/connector-api), bu
 | Stream              | Endpoint                   | Primary Key | Replication Key | Parent Stream |
 |---------------------|----------------------------|-------------|-----------------|---------------|
 | services            | /services/getAll           | Id          | UpdatedUtc      | -             |
+| customers           | /customers/getAll          | Id          | UpdatedUtc      | -             |
 | resource_categories | /resourceCategories/getAll | Id          | None            | services      |
 | resources           | /resources/getAll          | Id          | UpdatedUtc      | services      |
 | reservations        | /reservations/getAll       | Id          | UpdatedUtc      | services      |
-| customers           | /customers/getAll          | Id          | UpdatedUtc      | reservations  |
 
 **Stream Hierarchy:**
-- `services` is the root parent stream
+- `services` and `customers` are independent parent streams
 - `resource_categories`, `resources`, and `reservations` are children of `services` (partitioned by ServiceId)
-- `customers` is a child of `reservations` (uses CustomerIds from reservations response)
+- Both `reservations` and `customers` use UpdatedUtc time interval filtering (max 3 months)
 
 ## Installation
 

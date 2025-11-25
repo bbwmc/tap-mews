@@ -114,7 +114,6 @@ class ReservationsStream(MewsChildStream):
     """Stream for reservations.
 
     Requires ServiceIds from parent services stream.
-    This is also a parent stream - customers stream depends on it.
     """
 
     name = "reservations"
@@ -159,11 +158,6 @@ class ReservationsStream(MewsChildStream):
         th.Property("CancellationReason", th.StringType, description="Cancellation reason"),
         th.Property("Options", th.ObjectType(), description="Reservation options"),
     ).to_dict()
-
-    def __init__(self, *args, **kwargs):
-        """Initialize and set up customer IDs collection."""
-        super().__init__(*args, **kwargs)
-        self._current_customer_ids = []
 
     def prepare_request_payload(
         self,
@@ -231,38 +225,11 @@ class ReservationsStream(MewsChildStream):
 
         return body
 
-    def parse_response(self, response):
-        """Parse response and collect customer IDs from Customers array.
 
-        The reservations API returns both Reservations and Customers arrays.
-        We collect customer IDs here to pass to child streams.
-        """
-        data = response.json()
-
-        # Collect customer IDs from the Customers array
-        self._current_customer_ids = []
-        if "Customers" in data and data["Customers"]:
-            self._current_customer_ids = [c["Id"] for c in data["Customers"] if "Id" in c]
-
-        # Yield reservations as normal
-        yield from super().parse_response(response)
-
-    def get_child_context(self, record: dict, context: dict | None) -> dict:
-        """Pass customer IDs to child streams.
-
-        Returns customer IDs collected from the Customers array in the API response.
-        """
-        return {
-            "customer_ids": self._current_customer_ids,
-            "service_id": context.get("service_id") if context else None,
-        }
-
-
-class CustomersStream(MewsChildStream):
+class CustomersStream(MewsStream):
     """Stream for customers (guests).
 
-    Child of ReservationsStream - uses customer IDs from reservations response
-    to query the customers endpoint with CustomerIds filter.
+    Independent stream that uses UpdatedUtc time interval filtering.
     """
 
     name = "customers"
@@ -270,8 +237,6 @@ class CustomersStream(MewsChildStream):
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "Customers"
-    parent_stream_type = ReservationsStream
-    requires_service_id = False  # Customers endpoint doesn't use ServiceIds
 
     schema = th.PropertiesList(
         th.Property("Id", th.StringType, description="Unique identifier"),
@@ -310,24 +275,57 @@ class CustomersStream(MewsChildStream):
         context: dict | None,
         next_page_token: str | None,
     ) -> dict | None:
-        """Prepare request payload with CustomerIds filter.
+        """Prepare request payload with time interval filtering.
 
-        The customers endpoint requires at least one filter. We use CustomerIds
-        from the parent reservations response.
+        The customers endpoint requires UpdatedUtc time interval
+        with a maximum of 3 months. We enforce this limit to avoid API errors.
         """
+        from datetime import datetime, timedelta, timezone
+
         body = super().prepare_request_payload(context, next_page_token)
 
-        # Add CustomerIds filter from context
-        if context and "customer_ids" in context and context["customer_ids"]:
-            body["CustomerIds"] = context["customer_ids"]
-            self.logger.info(f"Querying customers with {len(context['customer_ids'])} customer IDs")
-        else:
-            # If no customer IDs, skip this request
-            self.logger.info("No customer IDs found in context, skipping customers request")
-            return None
+        # Get start_date from config
+        start_date_str = self.config.get("start_date")
+        if start_date_str:
+            # Parse the start date - handle both date-only and datetime formats
+            if isinstance(start_date_str, str):
+                # datetime.fromisoformat handles both YYYY-MM-DD and full ISO formats
+                start_date = datetime.fromisoformat(start_date_str.replace("Z", "+00:00"))
+            else:
+                start_date = start_date_str
 
-        # Remove ServiceIds as customers endpoint doesn't use it
-        body.pop("ServiceIds", None)
+            # Ensure start_date is timezone-aware (convert naive to UTC)
+            if start_date.tzinfo is None:
+                start_date = start_date.replace(tzinfo=timezone.utc)
+
+            # Use current time as end date (or you could make this configurable)
+            end_date = datetime.now(timezone.utc)
+
+            # Enforce 3-month maximum as per API limits
+            max_interval = timedelta(days=90)  # ~3 months
+            if (end_date - start_date) > max_interval:
+                # Cap the end date to 3 months from start
+                end_date = start_date + max_interval
+                self.logger.warning(
+                    f"Date range exceeds 3-month API limit. "
+                    f"Capping to {start_date.date()} - {end_date.date()}. "
+                    f"Use incremental sync for ongoing updates."
+                )
+
+            # Format dates as ISO 8601 with Z suffix (required by Mews API)
+            # Use timespec='seconds' to avoid microseconds in the output
+            start_utc = start_date.isoformat(timespec='seconds').replace("+00:00", "Z")
+            end_utc = end_date.isoformat(timespec='seconds').replace("+00:00", "Z")
+
+            # Add UpdatedUtc time interval (API requires this for customers)
+            body["UpdatedUtc"] = {
+                "StartUtc": start_utc,
+                "EndUtc": end_utc,
+            }
+
+            self.logger.info(
+                f"Querying customers with UpdatedUtc: {start_utc} to {end_utc}"
+            )
 
         # Log the full request body (masking sensitive data)
         import json
