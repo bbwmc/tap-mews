@@ -10,6 +10,21 @@ from singer_sdk import typing as th
 from tap_mews.client import MewsChildStream, MewsStream
 
 
+def _require_enterprise_ids(config: dict, stream_name: str) -> list[str]:
+    """Return enterprise IDs from config or raise if missing."""
+
+    enterprise_ids = config.get("enterprise_ids")
+    if not enterprise_ids:
+        raise ValueError(
+            f"{stream_name} stream requires 'enterprise_ids' to be set in the tap config."
+        )
+
+    if isinstance(enterprise_ids, (list, tuple)):
+        return list(enterprise_ids)
+
+    return [enterprise_ids]
+
+
 class ServicesStream(MewsStream):
     """Stream for services (accommodation, spa, etc.).
 
@@ -341,6 +356,173 @@ class CustomersStream(MewsStream):
         safe_body["ClientToken"] = "***"
         safe_body["AccessToken"] = "***"
         self.logger.info(f"Full customers request body: {json.dumps(safe_body, indent=2)}")
+
+        return body
+
+
+class RatesStream(MewsStream):
+    """Stream for rates definitions."""
+
+    name = "rates"
+    path = "/rates/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "Rates"
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Rate identifier"),
+        th.Property("GroupId", th.StringType, description="Rate group identifier"),
+        th.Property("ServiceId", th.StringType, description="Service identifier"),
+        th.Property("BaseRateId", th.StringType, description="Base rate identifier"),
+        th.Property("IsBaseRate", th.BooleanType, description="Whether this is the base rate"),
+        th.Property("BusinessSegmentId", th.StringType, description="Business segment identifier"),
+        th.Property("IsActive", th.BooleanType, description="Active state flag"),
+        th.Property("IsEnabled", th.BooleanType, description="Enabled flag"),
+        th.Property("IsPublic", th.BooleanType, description="Publicly available flag"),
+        th.Property("IsDefault", th.BooleanType, description="Default rate flag"),
+        th.Property("Type", th.StringType, description="Rate type"),
+        th.Property("Name", th.StringType, description="Primary rate name"),
+        th.Property("Names", th.ObjectType(), description="Localized names"),
+        th.Property("ExternalNames", th.ObjectType(), description="External names"),
+        th.Property("ShortName", th.StringType, description="Short name"),
+        th.Property("Description", th.ObjectType(), description="Localized descriptions"),
+        th.Property("ExternalIdentifier", th.StringType, description="External identifier"),
+        th.Property(
+            "Options",
+            th.ObjectType(
+                th.Property("HidePriceFromGuest", th.BooleanType),
+                th.Property("IsBonusPointsEligible", th.BooleanType),
+            ),
+            description="Rate options",
+        ),
+        th.Property(
+            "Pricing",
+            th.ObjectType(
+                th.Property("Discriminator", th.StringType),
+                th.Property(
+                    "BaseRatePricing",
+                    th.ObjectType(
+                        th.Property(
+                            "Amount",
+                            th.ObjectType(
+                                th.Property("Currency", th.StringType),
+                                th.Property("NetValue", th.NumberType),
+                                th.Property("GrossValue", th.NumberType),
+                                th.Property(
+                                    "TaxValues",
+                                    th.ArrayType(
+                                        th.ObjectType(
+                                            th.Property("Code", th.StringType),
+                                            th.Property("Value", th.NumberType),
+                                        )
+                                    ),
+                                ),
+                                th.Property(
+                                    "Breakdown",
+                                    th.ObjectType(
+                                        th.Property(
+                                            "Items",
+                                            th.ArrayType(
+                                                th.ObjectType(
+                                                    th.Property("TaxRateCode", th.StringType),
+                                                    th.Property("NetValue", th.NumberType),
+                                                    th.Property("TaxValue", th.NumberType),
+                                                )
+                                            ),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+                th.Property("DependentRatePricing", th.ObjectType()),
+            ),
+            description="Pricing definition",
+        ),
+        th.Property("TaxExemptionReason", th.StringType, description="Tax exemption reason"),
+        th.Property("TaxExemptionLegalReference", th.StringType, description="Tax exemption legal reference"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last updated timestamp"),
+    ).to_dict()
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        body = super().prepare_request_payload(context, next_page_token)
+        body["EnterpriseIds"] = _require_enterprise_ids(self.config, self.name)
+        return body
+
+
+class AccountingCategoriesStream(MewsStream):
+    """Stream for accounting categories."""
+
+    name = "accounting_categories"
+    path = "/accountingCategories/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "AccountingCategories"
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Accounting category identifier"),
+        th.Property("EnterpriseId", th.StringType, description="Enterprise identifier"),
+        th.Property("IsActive", th.BooleanType, description="Active state flag"),
+        th.Property("Name", th.StringType, description="Name"),
+        th.Property("Code", th.StringType, description="Code"),
+        th.Property("ExternalCode", th.StringType, description="External code"),
+        th.Property("LedgerAccountCode", th.StringType, description="Ledger account code"),
+        th.Property("PostingAccountCode", th.StringType, description="Posting account code"),
+        th.Property("CostCenterCode", th.StringType, description="Cost center code"),
+        th.Property("Classification", th.StringType, description="Classification"),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
+    ).to_dict()
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        body = super().prepare_request_payload(context, next_page_token)
+        body["EnterpriseIds"] = _require_enterprise_ids(self.config, self.name)
+        return body
+
+
+class CompanionshipsStream(MewsChildStream):
+    """Stream for companionships linked to reservations."""
+
+    name = "companionships"
+    path = "/companionships/getAll"
+    primary_keys = ("Id",)
+    replication_key = None
+    records_key = "Companionships"
+    parent_stream_type = ReservationsStream
+    requires_service_id = False
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Companionship identifier"),
+        th.Property("CustomerId", th.StringType, description="Customer identifier"),
+        th.Property("ReservationGroupId", th.StringType, description="Reservation group identifier"),
+        th.Property("ReservationId", th.StringType, description="Reservation identifier"),
+        th.Property("Reservations", th.ArrayType(th.ObjectType()), description="Reservations payload"),
+        th.Property(
+            "ReservationGroups",
+            th.ArrayType(th.ObjectType()),
+            description="Reservation group payload",
+        ),
+        th.Property("Customers", th.ArrayType(th.ObjectType()), description="Customer payload"),
+    ).to_dict()
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        body = super().prepare_request_payload(context, next_page_token)
+
+        if context and "reservation_id" in context:
+            body["ReservationIds"] = [context["reservation_id"]]
 
         return body
 

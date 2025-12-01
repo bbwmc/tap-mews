@@ -6,10 +6,13 @@ from singer_sdk import Stream, Tap
 from singer_sdk import typing as th
 
 from tap_mews.streams import (
+    AccountingCategoriesStream,
     BillsStream,
+    CompanionshipsStream,
     CustomersStream,
     OrderItemsStream,
     PaymentsStream,
+    RatesStream,
     ReservationsStream,
     ResourceCategoriesStream,
     ResourcesStream,
@@ -74,10 +77,13 @@ class TapMews(Tap):
             ServicesStream(self),
             CustomersStream(self),
             ReservationsStream(self),
+            RatesStream(self),
+            AccountingCategoriesStream(self),
             # Service-dependent child streams
             ResourceCategoriesStream(self),
             ResourcesStream(self),
             # Reservation-dependent child streams
+            CompanionshipsStream(self),
             OrderItemsStream(self),
             # Order Item-dependent child streams
             BillsStream(self),
