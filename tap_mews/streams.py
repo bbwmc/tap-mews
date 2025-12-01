@@ -489,6 +489,138 @@ class AccountingCategoriesStream(MewsStream):
         return body
 
 
+class BusinessSegmentsStream(MewsStream):
+    """Stream for business segments."""
+
+    name = "business_segments"
+    path = "/businessSegments/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "BusinessSegments"
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Business segment identifier"),
+        th.Property("EnterpriseId", th.StringType, description="Enterprise identifier"),
+        th.Property("ServiceId", th.StringType, description="Service identifier"),
+        th.Property("IsActive", th.BooleanType, description="Active flag"),
+        th.Property("Name", th.StringType, description="Business segment name"),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
+    ).to_dict()
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        body = super().prepare_request_payload(context, next_page_token)
+        body["EnterpriseIds"] = _require_enterprise_ids(self.config, self.name)
+        return body
+
+
+class SourcesStream(MewsStream):
+    """Stream for sources (distribution channels)."""
+
+    name = "sources"
+    path = "/sources/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "Sources"
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Source identifier"),
+        th.Property("EnterpriseId", th.StringType, description="Enterprise identifier"),
+        th.Property("Name", th.StringType, description="Source name"),
+        th.Property("Type", th.StringType, description="Source type"),
+        th.Property("Code", th.IntegerType, description="Numeric code"),
+        th.Property("IsActive", th.BooleanType, description="Active flag"),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
+    ).to_dict()
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        body = super().prepare_request_payload(context, next_page_token)
+        body["EnterpriseIds"] = _require_enterprise_ids(self.config, self.name)
+        return body
+
+
+class CompaniesStream(MewsStream):
+    """Stream for companies (corporate accounts)."""
+
+    name = "companies"
+    path = "/companies/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "Companies"
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Company identifier"),
+        th.Property("ChainId", th.StringType, description="Chain identifier"),
+        th.Property("Name", th.StringType, description="Company name"),
+        th.Property("MotherCompanyId", th.StringType, description="Parent company identifier"),
+        th.Property("InvoicingEmail", th.StringType, description="Invoicing email"),
+        th.Property("WebsiteUrl", th.StringType, description="Website URL"),
+        th.Property("InvoiceDueInterval", th.IntegerType, description="Invoice due interval"),
+        th.Property(
+            "NchClassifications",
+            th.ObjectType(
+                th.Property("Corporate", th.BooleanType),
+                th.Property("Internal", th.BooleanType),
+                th.Property("Private", th.BooleanType),
+                th.Property("OnlineTravelAgency", th.BooleanType),
+                th.Property("GlobalDistributionSystem", th.BooleanType),
+                th.Property("Marketing", th.BooleanType),
+                th.Property("Inactive", th.BooleanType),
+                th.Property("GovernmentEntity", th.BooleanType),
+            ),
+            description="NCH classification flags",
+        ),
+        th.Property(
+            "Options",
+            th.ObjectType(
+                th.Property("Invoiceable", th.BooleanType),
+                th.Property("AddFeesToInvoices", th.BooleanType),
+                th.Property("AddTaxDeductedPaymentToInvoices", th.BooleanType),
+            ),
+            description="Company options",
+        ),
+        th.Property(
+            "CreditRating",
+            th.ObjectType(
+                th.Property("Basic", th.StringType),
+            ),
+            description="Credit rating data",
+        ),
+        th.Property("Department", th.StringType, description="Department"),
+        th.Property("DunsNumber", th.StringType, description="DUNS number"),
+        th.Property("ReferenceIdentifier", th.StringType, description="Reference identifier"),
+        th.Property("AccountingCode", th.StringType, description="Accounting code"),
+        th.Property("AdditionalTaxIdentifier", th.StringType, description="Additional tax ID"),
+        th.Property("BillingCode", th.StringType, description="Billing code"),
+        th.Property("Contact", th.ObjectType(), description="Contact details"),
+        th.Property("ContactPerson", th.ObjectType(), description="Contact person details"),
+        th.Property("ElectronicInvoiceIdentifier", th.StringType, description="Electronic invoice ID"),
+        th.Property("Identifier", th.StringType, description="Identifier"),
+        th.Property("Iata", th.StringType, description="IATA number"),
+        th.Property("IsActive", th.BooleanType, description="Active flag"),
+        th.Property("Notes", th.StringType, description="Notes"),
+        th.Property("Number", th.IntegerType, description="Company number"),
+        th.Property("TaxIdentifier", th.StringType, description="Tax identifier"),
+        th.Property("Telephone", th.StringType, description="Telephone"),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
+        th.Property("Address", th.ObjectType(), description="Address object"),
+        th.Property("AddressId", th.StringType, description="Address identifier"),
+        th.Property("MergeTargetId", th.StringType, description="Merge target identifier"),
+        th.Property("TaxIdentificationNumber", th.StringType, description="Tax identification number"),
+        th.Property("ExternalIdentifier", th.StringType, description="External identifier"),
+        th.Property("IsUpdatedByMe", th.BooleanType, description="Flag indicating if updated by this client"),
+    ).to_dict()
+
 class CompanionshipsStream(MewsChildStream):
     """Stream for companionships linked to reservations."""
 
