@@ -1036,3 +1036,120 @@ class PaymentsStream(MewsChildStream):
             body["BillIds"] = [context["bill_id"]]
 
         return body
+
+
+class PaymentRequestsStream(MewsChildStream):
+    """Stream for payment requests linked to reservations."""
+
+    name = "payment_requests"
+    path = "/paymentRequests/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "PaymentRequests"
+    parent_stream_type = ReservationsStream
+    requires_service_id = False
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Payment request identifier"),
+        th.Property("EnterpriseId", th.StringType, description="Enterprise identifier"),
+        th.Property("AccountId", th.StringType, description="Account identifier"),
+        th.Property("CustomerId", th.StringType, description="Deprecated customer identifier"),
+        th.Property("ReservationGroupId", th.StringType, description="Reservation group identifier"),
+        th.Property("ReservationId", th.StringType, description="Reservation identifier"),
+        th.Property("State", th.StringType, description="Payment request state"),
+        th.Property(
+            "Amount",
+            th.ObjectType(
+                th.Property("Currency", th.StringType),
+                th.Property("NetValue", th.NumberType),
+                th.Property("GrossValue", th.NumberType),
+                th.Property(
+                    "TaxValues",
+                    th.ArrayType(
+                        th.ObjectType(
+                            th.Property("Code", th.StringType),
+                            th.Property("Value", th.NumberType),
+                        )
+                    ),
+                ),
+                th.Property(
+                    "Breakdown",
+                    th.ObjectType(
+                        th.Property(
+                            "Items",
+                            th.ArrayType(
+                                th.ObjectType(
+                                    th.Property("TaxRateCode", th.StringType),
+                                    th.Property("NetValue", th.NumberType),
+                                    th.Property("TaxValue", th.NumberType),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            description="Requested amount",
+        ),
+        th.Property("Type", th.StringType, description="Payment request type"),
+        th.Property("Reason", th.StringType, description="Payment request reason"),
+        th.Property("ExpirationUtc", th.DateTimeType, description="Expiration timestamp"),
+        th.Property("Description", th.StringType, description="Payment request description"),
+        th.Property("Notes", th.StringType, description="Internal notes"),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
+    ).to_dict()
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        """Prepare request payload with optional enterprise filter and date window."""
+        import json
+        from datetime import datetime, timedelta, timezone
+
+        body = super().prepare_request_payload(context, next_page_token)
+
+        enterprise_ids = self.config.get("enterprise_ids")
+        if enterprise_ids:
+            body["EnterpriseIds"] = (
+                enterprise_ids if isinstance(enterprise_ids, list) else [enterprise_ids]
+            )
+
+        if context and "reservation_id" in context:
+            body["ReservationIds"] = [context["reservation_id"]]
+
+        start_date_str = self.config.get("start_date")
+        if start_date_str:
+            if isinstance(start_date_str, str):
+                start_date = datetime.fromisoformat(start_date_str.replace("Z", "+00:00"))
+            else:
+                start_date = start_date_str
+
+            if start_date.tzinfo is None:
+                start_date = start_date.replace(tzinfo=timezone.utc)
+
+            end_date = datetime.now(timezone.utc)
+            max_interval = timedelta(days=90)
+            if (end_date - start_date) > max_interval:
+                end_date = start_date + max_interval
+                self.logger.warning(
+                    "Date range exceeds 3-month API limit. "
+                    f"Capping to {start_date.date()} - {end_date.date()}."
+                )
+
+            start_utc = start_date.isoformat(timespec="seconds").replace("+00:00", "Z")
+            end_utc = end_date.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+            body["UpdatedUtc"] = {"StartUtc": start_utc, "EndUtc": end_utc}
+
+            self.logger.info(
+                f"Querying payment_requests with UpdatedUtc: {start_utc} to {end_utc}"
+            )
+
+        safe_body = {k: v for k, v in body.items() if k not in ["ClientToken", "AccessToken"]}
+        safe_body["ClientToken"] = "***"
+        safe_body["AccessToken"] = "***"
+        self.logger.info(f"Full payment_requests request body: {json.dumps(safe_body, indent=2)}")
+
+        return body

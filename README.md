@@ -14,6 +14,7 @@ Singer tap for [Mews PMS API](https://mews-systems.gitbook.io/connector-api), bu
 | sources             | /sources/getAll                  | Id          | UpdatedUtc      | -                |
 | companies           | /companies/getAll                | Id          | UpdatedUtc      | -                |
 | business_segments   | /businessSegments/getAll         | Id          | UpdatedUtc      | -                |
+| payment_requests    | /paymentRequests/getAll          | Id          | UpdatedUtc      | reservations     |
 | resource_categories | /resourceCategories/getAll       | Id          | None            | services         |
 | resources           | /resources/getAll                | Id          | UpdatedUtc      | services         |
 | products            | /products/getAll                 | Id          | UpdatedUtc      | services         |
@@ -25,9 +26,9 @@ Singer tap for [Mews PMS API](https://mews-systems.gitbook.io/connector-api), bu
 **Stream Hierarchy:**
 - `services`, `customers`, `reservations`, `rates`, `accounting_categories`, `sources`, `companies`, and `business_segments` are independent parent streams
 - `resource_categories`, `resources`, and `products` are children of `services` (partitioned by ServiceId)
-- `companionships` and `order_items` are children of `reservations` (order items use reservation IDs as `ServiceOrderIds`)
+- `companionships`, `order_items`, and `payment_requests` are children of `reservations` (order items use reservation IDs as `ServiceOrderIds`)
 - `bills` is a child of `order_items`, and `payments` is a child of `bills`
-- `reservations` and `customers` use UpdatedUtc time interval filtering (max 3 months)
+- `reservations`, `customers`, and `payment_requests` use UpdatedUtc time interval filtering (max 3 months)
 
 ## Installation
 
@@ -55,6 +56,7 @@ plugins:
 | client_token | Yes      |                      | Mews API Client Token                                                        |
 | access_token | Yes      |                      | Mews API Access Token                                                        |
 | start_date   | Yes      |                      | Start date for retrieving reservations (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ) |
+| enterprise_ids | No     |                      | List of Enterprise IDs to scope certain requests (e.g., rates, sources, payment_requests) |
 | api_url      | No       | https://api.mews.com | Mews API base URL                                                            |
 | client_name  | No       | BBGMeltano 1.0.0     | Client identifier sent with API requests                                     |
 
