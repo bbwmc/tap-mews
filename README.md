@@ -14,7 +14,7 @@ Singer tap for [Mews PMS API](https://mews-systems.gitbook.io/connector-api), bu
 | sources             | /sources/getAll                  | Id          | UpdatedUtc      | -                |
 | companies           | /companies/getAll                | Id          | UpdatedUtc      | -                |
 | business_segments   | /businessSegments/getAll         | Id          | UpdatedUtc      | -                |
-| payment_requests    | /paymentRequests/getAll          | Id          | UpdatedUtc      | reservations     |
+| payment_requests    | /paymentRequests/getAll          | Id          | UpdatedUtc      | -                |
 | resource_categories | /resourceCategories/getAll       | Id          | None            | services         |
 | resources           | /resources/getAll                | Id          | UpdatedUtc      | services         |
 | products            | /products/getAll                 | Id          | UpdatedUtc      | services         |
@@ -24,9 +24,9 @@ Singer tap for [Mews PMS API](https://mews-systems.gitbook.io/connector-api), bu
 | payments            | /payments/getAll                 | Id          | UpdatedUtc      | bills            |
 
 **Stream Hierarchy:**
-- `services`, `customers`, `reservations`, `rates`, `accounting_categories`, `sources`, `companies`, and `business_segments` are independent parent streams
+- `services`, `customers`, `reservations`, `rates`, `accounting_categories`, `sources`, `companies`, `business_segments`, and `payment_requests` are independent parent streams
 - `resource_categories`, `resources`, and `products` are children of `services` (partitioned by ServiceId)
-- `companionships`, `order_items`, and `payment_requests` are children of `reservations` (order items use reservation IDs as `ServiceOrderIds`)
+- `companionships` and `order_items` are children of `reservations` (order items use reservation IDs as `ServiceOrderIds`)
 - `bills` is a child of `order_items`, and `payments` is a child of `bills`
 - `reservations`, `customers`, and `payment_requests` use UpdatedUtc time interval filtering (max 3 months)
 

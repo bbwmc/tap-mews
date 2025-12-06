@@ -1038,16 +1038,14 @@ class PaymentsStream(MewsChildStream):
         return body
 
 
-class PaymentRequestsStream(MewsChildStream):
-    """Stream for payment requests linked to reservations."""
+class PaymentRequestsStream(MewsStream):
+    """Stream for payment requests."""
 
     name = "payment_requests"
     path = "/paymentRequests/getAll"
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "PaymentRequests"
-    parent_stream_type = ReservationsStream
-    requires_service_id = False
 
     schema = th.PropertiesList(
         th.Property("Id", th.StringType, description="Payment request identifier"),
@@ -1105,8 +1103,8 @@ class PaymentRequestsStream(MewsChildStream):
         next_page_token: str | None,
     ) -> dict | None:
         """Prepare request payload with optional enterprise filter and date window."""
-        import json
         from datetime import datetime, timedelta, timezone
+        import json
 
         body = super().prepare_request_payload(context, next_page_token)
 
@@ -1115,9 +1113,6 @@ class PaymentRequestsStream(MewsChildStream):
             body["EnterpriseIds"] = (
                 enterprise_ids if isinstance(enterprise_ids, list) else [enterprise_ids]
             )
-
-        if context and "reservation_id" in context:
-            body["ReservationIds"] = [context["reservation_id"]]
 
         start_date_str = self.config.get("start_date")
         if start_date_str:
