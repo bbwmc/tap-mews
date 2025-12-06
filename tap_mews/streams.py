@@ -556,6 +556,72 @@ class RatesStream(MewsStream):
         return body
 
 
+class RateGroupsStream(MewsChildStream):
+    """Stream for rate groups."""
+
+    name = "rate_groups"
+    path = "/rateGroups/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "RateGroups"
+    parent_stream_type = ServicesStream
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Rate group identifier"),
+        th.Property("ServiceId", th.StringType, description="Service identifier"),
+        th.Property("IsActive", th.BooleanType, description="Whether active"),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
+        th.Property("Ordering", th.IntegerType, description="Display ordering"),
+        th.Property("Names", th.ObjectType(), description="Localized names"),
+        th.Property("ShortNames", th.ObjectType(), description="Localized short names"),
+        th.Property("Descriptions", th.ObjectType(), description="Localized descriptions"),
+        th.Property("ExternalIdentifier", th.StringType, description="External rate group ID"),
+    ).to_dict()
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        """Prepare request payload with service, enterprise, and date filtering."""
+        from datetime import datetime, timedelta, timezone
+
+        body = super().prepare_request_payload(context, next_page_token)
+
+        enterprise_ids = self.config.get("enterprise_ids")
+        if enterprise_ids:
+            body["EnterpriseIds"] = (
+                enterprise_ids if isinstance(enterprise_ids, list) else [enterprise_ids]
+            )
+
+        start_date_str = self.config.get("start_date")
+        if start_date_str:
+            if isinstance(start_date_str, str):
+                start_date = datetime.fromisoformat(start_date_str.replace("Z", "+00:00"))
+            else:
+                start_date = start_date_str
+
+            if start_date.tzinfo is None:
+                start_date = start_date.replace(tzinfo=timezone.utc)
+
+            end_date = datetime.now(timezone.utc)
+            max_interval = timedelta(days=90)
+            if (end_date - start_date) > max_interval:
+                end_date = start_date + max_interval
+                self.logger.warning(
+                    "Date range exceeds 3-month API limit. "
+                    f"Capping to {start_date.date()} - {end_date.date()}."
+                )
+
+            start_utc = start_date.isoformat(timespec="seconds").replace("+00:00", "Z")
+            end_utc = end_date.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+            body["UpdatedUtc"] = {"StartUtc": start_utc, "EndUtc": end_utc}
+
+        return body
+
+
 class AccountingCategoriesStream(MewsStream):
     """Stream for accounting categories."""
 
