@@ -622,6 +622,179 @@ class RateGroupsStream(MewsChildStream):
         return body
 
 
+class RestrictionsStream(MewsChildStream):
+    """Stream for restrictions."""
+
+    name = "restrictions"
+    path = "/restrictions/getAll"
+    primary_keys = ("Id",)
+    replication_key = None
+    records_key = "Restrictions"
+    parent_stream_type = ServicesStream
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Restriction identifier"),
+        th.Property("ServiceId", th.StringType, description="Service identifier"),
+        th.Property("ExternalIdentifier", th.StringType, description="External identifier"),
+        th.Property("Origin", th.StringType, description="Restriction origin"),
+        th.Property(
+            "Conditions",
+            th.ObjectType(
+                th.Property("Type", th.StringType),
+                th.Property("ExactRateId", th.StringType),
+                th.Property("BaseRateId", th.StringType),
+                th.Property("RateGroupId", th.StringType),
+                th.Property("ResourceCategoryId", th.StringType),
+                th.Property("ResourceCategoryType", th.StringType),
+                th.Property("StartUtc", th.DateTimeType),
+                th.Property("EndUtc", th.DateTimeType),
+                th.Property("Days", th.ArrayType(th.StringType)),
+                th.Property("Hours", th.ObjectType()),
+            ),
+            description="Restriction conditions",
+        ),
+        th.Property(
+            "Exceptions",
+            th.ObjectType(
+                th.Property("MinAdvance", th.StringType),
+                th.Property("MaxAdvance", th.StringType),
+                th.Property("MinLength", th.StringType),
+                th.Property("MaxLength", th.StringType),
+                th.Property(
+                    "MinPrice",
+                    th.ObjectType(
+                        th.Property("Value", th.NumberType),
+                        th.Property("Currency", th.StringType),
+                    ),
+                ),
+                th.Property(
+                    "MaxPrice",
+                    th.ObjectType(
+                        th.Property("Value", th.NumberType),
+                        th.Property("Currency", th.StringType),
+                    ),
+                ),
+            ),
+            description="Restriction exceptions",
+        ),
+    ).to_dict()
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        """Prepare request payload with enterprise filter and date window."""
+        from datetime import datetime, timedelta, timezone
+
+        body = super().prepare_request_payload(context, next_page_token)
+
+        enterprise_ids = self.config.get("enterprise_ids")
+        if enterprise_ids:
+            body["EnterpriseIds"] = (
+                enterprise_ids if isinstance(enterprise_ids, list) else [enterprise_ids]
+            )
+
+        start_date_str = self.config.get("start_date")
+        if start_date_str:
+            if isinstance(start_date_str, str):
+                start_date = datetime.fromisoformat(start_date_str.replace("Z", "+00:00"))
+            else:
+                start_date = start_date_str
+
+            if start_date.tzinfo is None:
+                start_date = start_date.replace(tzinfo=timezone.utc)
+
+            end_date = datetime.now(timezone.utc)
+            max_interval = timedelta(days=90)
+            if (end_date - start_date) > max_interval:
+                end_date = start_date + max_interval
+                self.logger.warning(
+                    "Date range exceeds 3-month API limit. "
+                    f"Capping to {start_date.date()} - {end_date.date()}."
+                )
+
+            start_utc = start_date.isoformat(timespec="seconds").replace("+00:00", "Z")
+            end_utc = end_date.isoformat(timespec="seconds").replace("+00:00", "Z")
+            body["UpdatedUtc"] = {"StartUtc": start_utc, "EndUtc": end_utc}
+
+        return body
+
+
+class ProductServiceOrdersStream(MewsChildStream):
+    """Stream for product service orders."""
+
+    name = "product_service_orders"
+    path = "/productServiceOrders/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "ProductServiceOrders"
+    parent_stream_type = ServicesStream
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Product service order identifier"),
+        th.Property("ServiceId", th.StringType, description="Service identifier"),
+        th.Property("AccountId", th.StringType, description="Account identifier"),
+        th.Property("AccountType", th.StringType, description="Account type"),
+        th.Property("CreatorProfileId", th.StringType, description="Creator profile identifier"),
+        th.Property("UpdaterProfileId", th.StringType, description="Updater profile identifier"),
+        th.Property("BookerId", th.StringType, description="Booker identifier"),
+        th.Property("Number", th.StringType, description="Confirmation number"),
+        th.Property("State", th.StringType, description="Service order state"),
+        th.Property("Origin", th.StringType, description="Service order origin"),
+        th.Property("CommanderOrigin", th.StringType, description="Commander origin"),
+        th.Property("OriginDetails", th.StringType, description="Origin details"),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
+        th.Property("CancelledUtc", th.DateTimeType, description="Cancellation timestamp"),
+        th.Property("VoucherId", th.StringType, description="Voucher identifier"),
+        th.Property("BusinessSegmentId", th.StringType, description="Business segment identifier"),
+        th.Property("LinkedReservationId", th.StringType, description="Linked reservation identifier"),
+        th.Property("Options", th.ObjectType(), description="Service order options"),
+    ).to_dict()
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        """Prepare request payload with service, enterprise, and date filters."""
+        from datetime import datetime, timedelta, timezone
+
+        body = super().prepare_request_payload(context, next_page_token)
+
+        enterprise_ids = self.config.get("enterprise_ids")
+        if enterprise_ids:
+            body["EnterpriseIds"] = (
+                enterprise_ids if isinstance(enterprise_ids, list) else [enterprise_ids]
+            )
+
+        start_date_str = self.config.get("start_date")
+        if start_date_str:
+            if isinstance(start_date_str, str):
+                start_date = datetime.fromisoformat(start_date_str.replace("Z", "+00:00"))
+            else:
+                start_date = start_date_str
+
+            if start_date.tzinfo is None:
+                start_date = start_date.replace(tzinfo=timezone.utc)
+
+            end_date = datetime.now(timezone.utc)
+            max_interval = timedelta(days=90)
+            if (end_date - start_date) > max_interval:
+                end_date = start_date + max_interval
+                self.logger.warning(
+                    "Date range exceeds 3-month API limit. "
+                    f"Capping to {start_date.date()} - {end_date.date()}."
+                )
+
+            start_utc = start_date.isoformat(timespec="seconds").replace("+00:00", "Z")
+            end_utc = end_date.isoformat(timespec="seconds").replace("+00:00", "Z")
+            body["UpdatedUtc"] = {"StartUtc": start_utc, "EndUtc": end_utc}
+
+        return body
+
+
 class AccountingCategoriesStream(MewsStream):
     """Stream for accounting categories."""
 

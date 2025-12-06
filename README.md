@@ -16,6 +16,8 @@ Singer tap for [Mews PMS API](https://mews-systems.gitbook.io/connector-api), bu
 | business_segments   | /businessSegments/getAll         | Id          | UpdatedUtc      | -                |
 | payment_requests    | /paymentRequests/getAll          | Id          | UpdatedUtc      | -                |
 | rate_groups         | /rateGroups/getAll               | Id          | UpdatedUtc      | services         |
+| restrictions        | /restrictions/getAll             | Id          | None            | services         |
+| product_service_orders | /productServiceOrders/getAll  | Id          | UpdatedUtc      | services         |
 | resource_categories | /resourceCategories/getAll       | Id          | None            | services         |
 | resources           | /resources/getAll                | Id          | UpdatedUtc      | services         |
 | products            | /products/getAll                 | Id          | UpdatedUtc      | services         |
@@ -26,7 +28,7 @@ Singer tap for [Mews PMS API](https://mews-systems.gitbook.io/connector-api), bu
 
 **Stream Hierarchy:**
 - `services`, `customers`, `reservations`, `rates`, `accounting_categories`, `sources`, `companies`, `business_segments`, and `payment_requests` are independent parent streams
-- `resource_categories`, `resources`, `products`, and `rate_groups` are children of `services` (partitioned by ServiceId)
+- `resource_categories`, `resources`, `products`, `rate_groups`, `restrictions`, and `product_service_orders` are children of `services` (partitioned by ServiceId)
 - `companionships` and `order_items` are children of `reservations` (order items use reservation IDs as `ServiceOrderIds`)
 - `bills` is a child of `order_items`, and `payments` is a child of `bills`
 - `reservations`, `customers`, and `payment_requests` use UpdatedUtc time interval filtering (max 3 months)
