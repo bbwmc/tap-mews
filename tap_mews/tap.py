@@ -14,6 +14,7 @@ from tap_mews.streams import (
     CustomersStream,
     OrderItemsStream,
     PaymentsStream,
+    ProductsStream,
     RatesStream,
     ReservationsStream,
     ResourceCategoriesStream,
@@ -86,6 +87,7 @@ class TapMews(Tap):
             CompaniesStream(self),
             BusinessSegmentsStream(self),
             # Service-dependent child streams
+            ProductsStream(self),
             ResourceCategoriesStream(self),
             ResourcesStream(self),
             # Reservation-dependent child streams

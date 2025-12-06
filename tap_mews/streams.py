@@ -125,6 +125,107 @@ class ResourcesStream(MewsChildStream):
     ).to_dict()
 
 
+class ProductsStream(MewsChildStream):
+    """Stream for products (orderable items) linked to services."""
+
+    name = "products"
+    path = "/products/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "Products"
+    parent_stream_type = ServicesStream
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Unique identifier"),
+        th.Property("ServiceId", th.StringType, description="Service ID"),
+        th.Property("CategoryId", th.StringType, description="Product category ID"),
+        th.Property("AccountingCategoryId", th.StringType, description="Accounting category ID"),
+        th.Property("IsActive", th.BooleanType, description="Whether active"),
+        th.Property("IsDefault", th.BooleanType, description="Whether default product"),
+        th.Property("Name", th.StringType, description="Product name"),
+        th.Property("Names", th.ObjectType(), description="Localized names"),
+        th.Property("ExternalName", th.StringType, description="External product name"),
+        th.Property("ExternalNames", th.ObjectType(), description="Localized external names"),
+        th.Property("ShortName", th.StringType, description="Short name"),
+        th.Property("ShortNames", th.ObjectType(), description="Localized short names"),
+        th.Property("Description", th.StringType, description="Description"),
+        th.Property("Descriptions", th.ObjectType(), description="Localized descriptions"),
+        th.Property("Charging", th.StringType, description="Charging rule"),
+        th.Property("ChargingMode", th.StringType, description="Charging mode"),
+        th.Property("Posting", th.StringType, description="Posting rule"),
+        th.Property("PostingMode", th.StringType, description="Posting mode"),
+        th.Property(
+            "Options",
+            th.ObjectType(
+                th.Property("BillAsPackage", th.BooleanType),
+            ),
+            description="Product options",
+        ),
+        th.Property(
+            "Promotions",
+            th.ObjectType(
+                th.Property("BeforeCheckIn", th.BooleanType),
+                th.Property("AfterCheckIn", th.BooleanType),
+                th.Property("DuringStay", th.BooleanType),
+                th.Property("BeforeCheckOut", th.BooleanType),
+                th.Property("AfterCheckOut", th.BooleanType),
+                th.Property("DuringCheckOut", th.BooleanType),
+            ),
+            description="Promotion availability flags",
+        ),
+        th.Property(
+            "Classifications",
+            th.ObjectType(
+                th.Property("Food", th.BooleanType),
+                th.Property("Beverage", th.BooleanType),
+                th.Property("Wellness", th.BooleanType),
+                th.Property("CityTax", th.BooleanType),
+                th.Property("Fee", th.BooleanType),
+            ),
+            description="Classification flags",
+        ),
+        th.Property(
+            "Price",
+            th.ObjectType(
+                th.Property("Value", th.NumberType),
+                th.Property("Net", th.NumberType),
+                th.Property("Tax", th.NumberType),
+                th.Property("TaxRate", th.NumberType),
+                th.Property("Currency", th.StringType),
+                th.Property("NetValue", th.NumberType),
+                th.Property("GrossValue", th.NumberType),
+                th.Property(
+                    "TaxValues",
+                    th.ArrayType(
+                        th.ObjectType(
+                            th.Property("Code", th.StringType),
+                            th.Property("Value", th.NumberType),
+                        ),
+                    ),
+                ),
+                th.Property(
+                    "Breakdown",
+                    th.ObjectType(
+                        th.Property(
+                            "Items",
+                            th.ArrayType(
+                                th.ObjectType(
+                                    th.Property("TaxRateCode", th.StringType),
+                                    th.Property("NetValue", th.NumberType),
+                                    th.Property("TaxValue", th.NumberType),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            description="Current price details",
+        ),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
+    ).to_dict()
+
+
 class ReservationsStream(MewsStream):
     """Stream for reservations.
 

@@ -4,18 +4,30 @@ Singer tap for [Mews PMS API](https://mews-systems.gitbook.io/connector-api), bu
 
 ## Streams
 
-| Stream              | Endpoint                   | Primary Key | Replication Key | Parent Stream |
-|---------------------|----------------------------|-------------|-----------------|---------------|
-| services            | /services/getAll           | Id          | UpdatedUtc      | -             |
-| customers           | /customers/getAll          | Id          | UpdatedUtc      | -             |
-| resource_categories | /resourceCategories/getAll | Id          | None            | services      |
-| resources           | /resources/getAll          | Id          | UpdatedUtc      | services      |
-| reservations        | /reservations/getAll       | Id          | UpdatedUtc      | services      |
+| Stream              | Endpoint                        | Primary Key | Replication Key | Parent Stream    |
+|---------------------|---------------------------------|-------------|-----------------|------------------|
+| services            | /services/getAll                 | Id          | UpdatedUtc      | -                |
+| customers           | /customers/getAll                | Id          | UpdatedUtc      | -                |
+| reservations        | /reservations/getAll/2023-06-06  | Id          | UpdatedUtc      | -                |
+| rates               | /rates/getAll                    | Id          | UpdatedUtc      | -                |
+| accounting_categories | /accountingCategories/getAll   | Id          | UpdatedUtc      | -                |
+| sources             | /sources/getAll                  | Id          | UpdatedUtc      | -                |
+| companies           | /companies/getAll                | Id          | UpdatedUtc      | -                |
+| business_segments   | /businessSegments/getAll         | Id          | UpdatedUtc      | -                |
+| resource_categories | /resourceCategories/getAll       | Id          | None            | services         |
+| resources           | /resources/getAll                | Id          | UpdatedUtc      | services         |
+| products            | /products/getAll                 | Id          | UpdatedUtc      | services         |
+| companionships      | /companionships/getAll           | Id          | None            | reservations     |
+| order_items         | /orderItems/getAll               | Id          | UpdatedUtc      | reservations     |
+| bills               | /bills/getAll                    | Id          | UpdatedUtc      | order_items      |
+| payments            | /payments/getAll                 | Id          | UpdatedUtc      | bills            |
 
 **Stream Hierarchy:**
-- `services` and `customers` are independent parent streams
-- `resource_categories`, `resources`, and `reservations` are children of `services` (partitioned by ServiceId)
-- Both `reservations` and `customers` use UpdatedUtc time interval filtering (max 3 months)
+- `services`, `customers`, `reservations`, `rates`, `accounting_categories`, `sources`, `companies`, and `business_segments` are independent parent streams
+- `resource_categories`, `resources`, and `products` are children of `services` (partitioned by ServiceId)
+- `companionships` and `order_items` are children of `reservations` (order items use reservation IDs as `ServiceOrderIds`)
+- `bills` is a child of `order_items`, and `payments` is a child of `bills`
+- `reservations` and `customers` use UpdatedUtc time interval filtering (max 3 months)
 
 ## Installation
 
