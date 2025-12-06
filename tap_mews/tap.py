@@ -7,6 +7,7 @@ from singer_sdk import typing as th
 
 from tap_mews.streams import (
     AccountingCategoriesStream,
+    AgeCategoriesStream,
     BillsStream,
     BusinessSegmentsStream,
     CompaniesStream,
@@ -95,6 +96,7 @@ class TapMews(Tap):
             ProductsStream(self),
             RateGroupsStream(self),
             RestrictionsStream(self),
+            AgeCategoriesStream(self),
             ProductServiceOrdersStream(self),
             ResourceCategoriesStream(self),
             ResourcesStream(self),
