@@ -238,6 +238,40 @@ class ReservationsStream(MewsStream):
     replication_key = "UpdatedUtc"
     records_key = "Reservations"
 
+    @property
+    def partitions(self) -> list[dict] | None:
+        """Return 90-day windows from bookmark/start_date up to now."""
+        from datetime import datetime, timedelta, timezone
+
+        max_interval = timedelta(days=90)
+        now = datetime.now(timezone.utc)
+
+        start = self.get_starting_timestamp(context=None)
+        if start is None:
+            start_str = self.config.get("start_date")
+            if start_str:
+                start = datetime.fromisoformat(str(start_str).replace("Z", "+00:00"))
+            else:
+                start = now - max_interval
+
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+
+        if start > now:
+            start = now - max_interval
+
+        partitions: list[dict] = []
+        cursor = start
+        while cursor < now:
+            window_end = min(cursor + max_interval, now)
+            partitions.append({"window_start": cursor, "window_end": window_end})
+            cursor = window_end
+
+        if not partitions:
+            partitions.append({"window_start": start, "window_end": now})
+
+        return partitions
+
     schema = th.PropertiesList(
         th.Property("Id", th.StringType, description="Reservation identifier"),
         th.Property("ServiceId", th.StringType, description="Service identifier"),
@@ -313,7 +347,8 @@ class ReservationsStream(MewsStream):
         """Prepare request payload with time interval filtering.
 
         The reservations endpoint requires UpdatedUtc time interval
-        with a maximum of 3 months. We enforce this limit to avoid API errors.
+        with a maximum of 3 months. We enforce this limit to avoid API errors
+        while covering the full historical range via chunked partitions.
         """
         from datetime import datetime, timedelta, timezone
 
@@ -324,48 +359,47 @@ class ReservationsStream(MewsStream):
         if enterprise_ids:
             body["EnterpriseIds"] = enterprise_ids if isinstance(enterprise_ids, list) else [enterprise_ids]
 
-        # Get start_date from config
-        start_date_str = self.config.get("start_date")
-        if start_date_str:
-            # Parse the start date - handle both date-only and datetime formats
-            if isinstance(start_date_str, str):
-                # datetime.fromisoformat handles both YYYY-MM-DD and full ISO formats
-                start_date = datetime.fromisoformat(start_date_str.replace("Z", "+00:00"))
-            else:
-                start_date = start_date_str
+        max_interval = timedelta(days=90)
+        now = datetime.now(timezone.utc)
 
-            # Ensure start_date is timezone-aware (convert naive to UTC)
-            if start_date.tzinfo is None:
-                start_date = start_date.replace(tzinfo=timezone.utc)
+        window_start = None
+        window_end = None
+        if context:
+            window_start = context.get("window_start")
+            window_end = context.get("window_end")
 
-            # Use current time as end date (or you could make this configurable)
-            end_date = datetime.now(timezone.utc)
+        if window_start is None or window_end is None:
+            # Fallback: derive a recent 90-day window from bookmark/config
+            derived_start = self.get_starting_timestamp(context)
+            if derived_start is None:
+                start_date_str = self.config.get("start_date")
+                if start_date_str:
+                    derived_start = datetime.fromisoformat(str(start_date_str).replace("Z", "+00:00"))
+                else:
+                    derived_start = now - max_interval
 
-            # Enforce 3-month maximum as per API limits
-            max_interval = timedelta(days=90)  # ~3 months
-            if (end_date - start_date) > max_interval:
-                # Cap the end date to 3 months from start
-                end_date = start_date + max_interval
-                self.logger.warning(
-                    f"Date range exceeds 3-month API limit. "
-                    f"Capping to {start_date.date()} - {end_date.date()}. "
-                    f"Use incremental sync for ongoing updates."
-                )
+            if derived_start.tzinfo is None:
+                derived_start = derived_start.replace(tzinfo=timezone.utc)
 
-            # Format dates as ISO 8601 with Z suffix (required by Mews API)
-            # Use timespec='seconds' to avoid microseconds in the output
-            start_utc = start_date.isoformat(timespec='seconds').replace("+00:00", "Z")
-            end_utc = end_date.isoformat(timespec='seconds').replace("+00:00", "Z")
+            window_start = max(derived_start, now - max_interval)
+            window_end = min(window_start + max_interval, now)
 
-            # Add UpdatedUtc time interval (API requires this for reservations)
-            body["UpdatedUtc"] = {
-                "StartUtc": start_utc,
-                "EndUtc": end_utc,
-            }
+        if window_start.tzinfo is None:
+            window_start = window_start.replace(tzinfo=timezone.utc)
+        if window_end.tzinfo is None:
+            window_end = window_end.replace(tzinfo=timezone.utc)
 
-            self.logger.info(
-                f"Querying reservations with UpdatedUtc: {start_utc} to {end_utc}"
-            )
+        start_utc = window_start.isoformat(timespec='seconds').replace("+00:00", "Z")
+        end_utc = window_end.isoformat(timespec='seconds').replace("+00:00", "Z")
+
+        body["UpdatedUtc"] = {
+            "StartUtc": start_utc,
+            "EndUtc": end_utc,
+        }
+
+        self.logger.info(
+            f"Querying reservations with UpdatedUtc: {start_utc} to {end_utc}"
+        )
 
         # Log the full request body (masking sensitive data)
         import json
