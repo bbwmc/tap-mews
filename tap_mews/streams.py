@@ -1590,3 +1590,285 @@ class PaymentRequestsStream(MewsStream):
         self.logger.info(f"Full payment_requests request body: {json.dumps(safe_body, indent=2)}")
 
         return body
+
+
+class AvailabilityBlocksStream(MewsStream):
+    """Stream for availability blocks."""
+
+    name = "availability_blocks"
+    path = "/availabilityBlocks/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "AvailabilityBlocks"
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Availability block identifier"),
+        th.Property("EnterpriseId", th.StringType, description="Enterprise identifier"),
+        th.Property("ServiceId", th.StringType, description="Service identifier"),
+        th.Property("RateId", th.StringType, description="Rate identifier"),
+        th.Property("VoucherId", th.StringType, description="Voucher identifier"),
+        th.Property("BookerId", th.StringType, description="Booker identifier"),
+        th.Property("CompanyId", th.StringType, description="Company identifier"),
+        th.Property("TravelAgencyId", th.StringType, description="Travel agency identifier"),
+        th.Property(
+            "Budget",
+            th.ObjectType(
+                th.Property("Currency", th.StringType),
+                th.Property("Value", th.NumberType),
+                th.Property("Net", th.NumberType),
+                th.Property("Tax", th.NumberType),
+                th.Property("TaxRate", th.NumberType),
+            ),
+            description="Tentative budget for reservations in the block",
+        ),
+        th.Property("State", th.StringType, description="Availability block state"),
+        th.Property("ReservationPurpose", th.StringType, description="Purpose of the block"),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
+        th.Property(
+            "FirstTimeUnitStartUtc",
+            th.DateTimeType,
+            description="Start of the first time unit",
+        ),
+        th.Property(
+            "LastTimeUnitStartUtc",
+            th.DateTimeType,
+            description="Start of the last time unit",
+        ),
+        th.Property("ReleasedUtc", th.DateTimeType, description="Fixed release timestamp"),
+        th.Property("RollingReleaseOffset", th.StringType, description="Rolling release offset"),
+        th.Property("ExternalIdentifier", th.StringType, description="External identifier"),
+        th.Property("Name", th.StringType, description="Block name"),
+        th.Property("Notes", th.StringType, description="Block notes"),
+        th.Property("PickupDistribution", th.StringType, description="Pickup distribution"),
+        th.Property("IsActive", th.BooleanType, description="Active flag"),
+        th.Property("QuoteId", th.StringType, description="Linked quote identifier"),
+        th.Property(
+            "AvailabilityBlockNumber",
+            th.StringType,
+            description="Unique number within Mews",
+        ),
+        th.Property("ReleaseStrategy", th.StringType, description="Release strategy"),
+        th.Property("PurchaseOrderNumber", th.StringType, description="Purchase order number"),
+        th.Property("BusinessSegmentId", th.StringType, description="Business segment identifier"),
+    ).to_dict()
+
+    @property
+    def partitions(self) -> list[dict] | None:
+        """Return 90-day windows from bookmark/start_date up to now."""
+        from datetime import datetime, timedelta, timezone
+
+        max_interval = timedelta(days=90)
+        now = datetime.now(timezone.utc)
+
+        start = self.get_starting_timestamp(context=None)
+        if start is None:
+            start_str = self.config.get("start_date")
+            if start_str:
+                start = datetime.fromisoformat(str(start_str).replace("Z", "+00:00"))
+            else:
+                start = now - max_interval
+
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+
+        if start > now:
+            start = now - max_interval
+
+        partitions: list[dict] = []
+        cursor = start
+        while cursor < now:
+            window_end = min(cursor + max_interval, now)
+            partitions.append({"window_start": cursor, "window_end": window_end})
+            cursor = window_end
+
+        if not partitions:
+            partitions.append({"window_start": start, "window_end": now})
+
+        return partitions
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        """Prepare request payload with enterprise filter and date window."""
+        from datetime import datetime, timedelta, timezone
+        import json
+
+        body = super().prepare_request_payload(context, next_page_token)
+
+        enterprise_ids = self.config.get("enterprise_ids")
+        if enterprise_ids:
+            body["EnterpriseIds"] = (
+                enterprise_ids if isinstance(enterprise_ids, list) else [enterprise_ids]
+            )
+
+        # Extent is required; request both availability blocks and adjustments.
+        body["Extent"] = {"AvailabilityBlocks": True, "Adjustments": True}
+
+        max_interval = timedelta(days=90)
+        now = datetime.now(timezone.utc)
+
+        window_start = None
+        window_end = None
+        if context:
+            window_start = context.get("window_start")
+            window_end = context.get("window_end")
+
+        if window_start is None or window_end is None:
+            derived_start = self.get_starting_timestamp(context)
+            if derived_start is None:
+                start_date_str = self.config.get("start_date")
+                if start_date_str:
+                    derived_start = datetime.fromisoformat(str(start_date_str).replace("Z", "+00:00"))
+                else:
+                    derived_start = now - max_interval
+
+            if derived_start.tzinfo is None:
+                derived_start = derived_start.replace(tzinfo=timezone.utc)
+
+            window_start = max(derived_start, now - max_interval)
+            window_end = min(window_start + max_interval, now)
+
+        if window_start.tzinfo is None:
+            window_start = window_start.replace(tzinfo=timezone.utc)
+        if window_end.tzinfo is None:
+            window_end = window_end.replace(tzinfo=timezone.utc)
+
+        start_utc = window_start.isoformat(timespec="seconds").replace("+00:00", "Z")
+        end_utc = window_end.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+        body["UpdatedUtc"] = {"StartUtc": start_utc, "EndUtc": end_utc}
+
+        self.logger.info(
+            f"Querying availability_blocks with UpdatedUtc: {start_utc} to {end_utc}"
+        )
+
+        safe_body = {k: v for k, v in body.items() if k not in ["ClientToken", "AccessToken"]}
+        safe_body["ClientToken"] = "***"
+        safe_body["AccessToken"] = "***"
+        self.logger.info(
+            f"Full availability_blocks request body: {json.dumps(safe_body, indent=2)}"
+        )
+
+        return body
+
+
+class ResourceBlocksStream(MewsStream):
+    """Stream for resource blocks (out-of-order/internal use)."""
+
+    name = "resource_blocks"
+    path = "/resourceBlocks/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "ResourceBlocks"
+
+    @property
+    def partitions(self) -> list[dict] | None:
+        """Return 90-day windows from bookmark/start_date up to now."""
+        from datetime import datetime, timedelta, timezone
+
+        max_interval = timedelta(days=90)
+        now = datetime.now(timezone.utc)
+
+        start = self.get_starting_timestamp(context=None)
+        if start is None:
+            start_str = self.config.get("start_date")
+            if start_str:
+                start = datetime.fromisoformat(str(start_str).replace("Z", "+00:00"))
+            else:
+                start = now - max_interval
+
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+
+        if start > now:
+            start = now - max_interval
+
+        partitions: list[dict] = []
+        cursor = start
+        while cursor < now:
+            window_end = min(cursor + max_interval, now)
+            partitions.append({"window_start": cursor, "window_end": window_end})
+            cursor = window_end
+
+        if not partitions:
+            partitions.append({"window_start": start, "window_end": now})
+
+        return partitions
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        """Prepare request payload with enterprise filter and UpdatedUtc window."""
+        from datetime import datetime, timedelta, timezone
+
+        body = super().prepare_request_payload(context, next_page_token)
+
+        enterprise_ids = self.config.get("enterprise_ids")
+        if enterprise_ids:
+            body["EnterpriseIds"] = (
+                enterprise_ids if isinstance(enterprise_ids, list) else [enterprise_ids]
+            )
+
+        # Include both active and deleted blocks to capture full history.
+        body["ActivityStates"] = ["Active", "Deleted"]
+
+        max_interval = timedelta(days=90)
+        now = datetime.now(timezone.utc)
+
+        window_start = None
+        window_end = None
+        if context:
+            window_start = context.get("window_start")
+            window_end = context.get("window_end")
+
+        if window_start is None or window_end is None:
+            derived_start = self.get_starting_timestamp(context)
+            if derived_start is None:
+                start_date_str = self.config.get("start_date")
+                if start_date_str:
+                    derived_start = datetime.fromisoformat(str(start_date_str).replace("Z", "+00:00"))
+                else:
+                    derived_start = now - max_interval
+
+            if derived_start.tzinfo is None:
+                derived_start = derived_start.replace(tzinfo=timezone.utc)
+
+            window_start = max(derived_start, now - max_interval)
+            window_end = min(window_start + max_interval, now)
+
+        if window_start.tzinfo is None:
+            window_start = window_start.replace(tzinfo=timezone.utc)
+        if window_end.tzinfo is None:
+            window_end = window_end.replace(tzinfo=timezone.utc)
+
+        start_utc = window_start.isoformat(timespec="seconds").replace("+00:00", "Z")
+        end_utc = window_end.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+        body["UpdatedUtc"] = {"StartUtc": start_utc, "EndUtc": end_utc}
+
+        return body
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Resource block identifier"),
+        th.Property("EnterpriseId", th.StringType, description="Enterprise identifier"),
+        th.Property(
+            "AssignedResourceId",
+            th.StringType,
+            description="Identifier of the assigned resource",
+        ),
+        th.Property("IsActive", th.BooleanType, description="Whether the block is active"),
+        th.Property("Type", th.StringType, description="Resource block type"),
+        th.Property("StartUtc", th.DateTimeType, description="Start of the block (UTC)"),
+        th.Property("EndUtc", th.DateTimeType, description="End of the block (UTC)"),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp (UTC)"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp (UTC)"),
+        th.Property("DeletedUtc", th.DateTimeType, description="Deletion timestamp (UTC)"),
+        th.Property("Name", th.StringType, description="Name of the block"),
+        th.Property("Notes", th.StringType, description="Notes about the block"),
+    ).to_dict()
+

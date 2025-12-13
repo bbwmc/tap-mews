@@ -15,6 +15,8 @@ Singer tap for [Mews PMS API](https://mews-systems.gitbook.io/connector-api), bu
 | companies           | /companies/getAll                | Id          | UpdatedUtc      | -                |
 | business_segments   | /businessSegments/getAll         | Id          | UpdatedUtc      | -                |
 | payment_requests    | /paymentRequests/getAll          | Id          | UpdatedUtc      | -                |
+| availability_blocks | /availabilityBlocks/getAll       | Id          | UpdatedUtc      | -                |
+| resource_blocks     | /resourceBlocks/getAll           | Id          | UpdatedUtc      | -                |
 | rate_groups         | /rateGroups/getAll               | Id          | UpdatedUtc      | services         |
 | restrictions        | /restrictions/getAll             | Id          | None            | services         |
 | product_service_orders | /productServiceOrders/getAll  | Id          | UpdatedUtc      | services         |
@@ -28,11 +30,11 @@ Singer tap for [Mews PMS API](https://mews-systems.gitbook.io/connector-api), bu
 | payments            | /payments/getAll                 | Id          | UpdatedUtc      | bills            |
 
 **Stream Hierarchy:**
-- `services`, `customers`, `reservations`, `rates`, `accounting_categories`, `sources`, `companies`, `business_segments`, and `payment_requests` are independent parent streams
+- `services`, `customers`, `reservations`, `rates`, `accounting_categories`, `sources`, `companies`, `business_segments`, `payment_requests`, `availability_blocks`, and `resource_blocks` are independent parent streams
 - `resource_categories`, `resources`, `products`, `rate_groups`, `restrictions`, `product_service_orders`, and `age_categories` are children of `services` (partitioned by ServiceId)
 - `companionships` and `order_items` are children of `reservations` (order items use reservation IDs as `ServiceOrderIds`)
 - `bills` is a child of `order_items`, and `payments` is a child of `bills`
-- `reservations`, `customers`, and `payment_requests` use UpdatedUtc time interval filtering (max 3 months)
+- `reservations`, `customers`, `payment_requests`, `availability_blocks`, and `resource_blocks` use UpdatedUtc time interval filtering (max 3 months)
 
 ## Installation
 
