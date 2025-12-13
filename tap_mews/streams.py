@@ -1100,7 +1100,11 @@ class CompaniesStream(MewsStream):
         th.Property("AccountingCode", th.StringType, description="Accounting code"),
         th.Property("AdditionalTaxIdentifier", th.StringType, description="Additional tax ID"),
         th.Property("BillingCode", th.StringType, description="Billing code"),
-        th.Property("Contact", th.ObjectType(), description="Contact details"),
+        th.Property(
+            "Contact",
+            th.CustomType({"type": ["object", "string", "null"]}),
+            description="Contact details (can be an object or plain string)",
+        ),
         th.Property("ContactPerson", th.ObjectType(), description="Contact person details"),
         th.Property("ElectronicInvoiceIdentifier", th.StringType, description="Electronic invoice ID"),
         th.Property("Identifier", th.StringType, description="Identifier"),
