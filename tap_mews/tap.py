@@ -24,6 +24,7 @@ from tap_mews.streams import (
     PaymentRequestsStream,
     AvailabilityBlocksStream,
     ResourceBlocksStream,
+    ResourceCategoryAssignmentsStream,
     ResourceCategoriesStream,
     ResourcesStream,
     SourcesStream,
@@ -75,6 +76,12 @@ class TapMews(Tap):
             required=False,
             description="List of Enterprise IDs to query (used for reservations and other enterprise-scoped endpoints)",
         ),
+        th.Property(
+            "resource_category_ids",
+            th.ArrayType(th.StringType),
+            required=False,
+            description="List of Resource Category IDs to query in resource_category_assignments stream",
+        ),
     ).to_dict()
 
     def discover_streams(self) -> list[Stream]:
@@ -96,6 +103,7 @@ class TapMews(Tap):
             PaymentRequestsStream(self),
             AvailabilityBlocksStream(self),
             ResourceBlocksStream(self),
+            ResourceCategoryAssignmentsStream(self),
             # Service-dependent child streams
             ProductsStream(self),
             RateGroupsStream(self),

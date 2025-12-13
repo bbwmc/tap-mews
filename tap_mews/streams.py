@@ -25,6 +25,7 @@ def _require_enterprise_ids(config: dict, stream_name: str) -> list[str]:
     return [enterprise_ids]
 
 
+
 class ServicesStream(MewsStream):
     """Stream for services (accommodation, spa, etc.).
 
@@ -91,6 +92,14 @@ class ResourceCategoriesStream(MewsChildStream):
         th.Property("ExtraCapacity", th.IntegerType, description="Extra capacity"),
         th.Property("ExternalIdentifier", th.StringType, description="External ID"),
     ).to_dict()
+
+    def get_child_context(self, record: dict, context: dict | None) -> dict:
+        """Pass service and category ids to child streams."""
+        return {
+            "service_id": record.get("ServiceId"),
+            "resource_category_id": record.get("Id"),
+            "enterprise_id": record.get("EnterpriseId"),
+        }
 
 
 class ResourcesStream(MewsChildStream):
@@ -1874,5 +1883,73 @@ class ResourceBlocksStream(MewsStream):
         th.Property("DeletedUtc", th.DateTimeType, description="Deletion timestamp (UTC)"),
         th.Property("Name", th.StringType, description="Name of the block"),
         th.Property("Notes", th.StringType, description="Notes about the block"),
+    ).to_dict()
+
+
+class ResourceCategoryAssignmentsStream(MewsChildStream):
+    """Stream for resource category assignments."""
+
+    name = "resource_category_assignments"
+    path = "/resourceCategoryAssignments/getAll"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "ResourceCategoryAssignments"
+    parent_stream_type = ResourceCategoriesStream
+    requires_service_id = True
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        """Prepare request payload scoped to a resource category with date window."""
+        from datetime import datetime, timedelta, timezone
+
+        body = super().prepare_request_payload(context, next_page_token)
+
+        # ResourceCategoryIds is required by the API; derive from parent context.
+        if context and context.get("resource_category_id"):
+            body["ResourceCategoryIds"] = [context["resource_category_id"]]
+        else:
+            raise ValueError("resource_category_id missing from parent context for assignments")
+
+        # Optional enterprise filter from config.
+        enterprise_ids = self.config.get("enterprise_ids")
+        if enterprise_ids:
+            body["EnterpriseIds"] = (
+                enterprise_ids if isinstance(enterprise_ids, list) else [enterprise_ids]
+            )
+
+        # Include both active and deleted records to capture full history.
+        body["ActivityStates"] = ["Active", "Deleted"]
+
+        max_interval = timedelta(days=90)
+        now = datetime.now(timezone.utc)
+
+        start = self.get_starting_timestamp(context)
+        if start is None:
+            start_str = self.config.get("start_date")
+            start = datetime.fromisoformat(str(start_str).replace("Z", "+00:00")) if start_str else now - max_interval
+
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+
+        window_start = max(start, now - max_interval)
+        window_end = min(window_start + max_interval, now)
+
+        start_utc = window_start.isoformat(timespec="seconds").replace("+00:00", "Z")
+        end_utc = window_end.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+        body["UpdatedUtc"] = {"StartUtc": start_utc, "EndUtc": end_utc}
+
+        return body
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Assignment identifier"),
+        th.Property("ResourceId", th.StringType, description="Resource identifier"),
+        th.Property("CategoryId", th.StringType, description="Resource category identifier"),
+        th.Property("IsActive", th.BooleanType, description="Whether the assignment is active"),
+        th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp (UTC)"),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp (UTC)"),
     ).to_dict()
 

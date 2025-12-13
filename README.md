@@ -17,6 +17,7 @@ Singer tap for [Mews PMS API](https://mews-systems.gitbook.io/connector-api), bu
 | payment_requests    | /paymentRequests/getAll          | Id          | UpdatedUtc      | -                |
 | availability_blocks | /availabilityBlocks/getAll       | Id          | UpdatedUtc      | -                |
 | resource_blocks     | /resourceBlocks/getAll           | Id          | UpdatedUtc      | -                |
+| resource_category_assignments | /resourceCategoryAssignments/getAll | Id | UpdatedUtc | resource_categories |
 | rate_groups         | /rateGroups/getAll               | Id          | UpdatedUtc      | services         |
 | restrictions        | /restrictions/getAll             | Id          | None            | services         |
 | product_service_orders | /productServiceOrders/getAll  | Id          | UpdatedUtc      | services         |
@@ -32,9 +33,10 @@ Singer tap for [Mews PMS API](https://mews-systems.gitbook.io/connector-api), bu
 **Stream Hierarchy:**
 - `services`, `customers`, `reservations`, `rates`, `accounting_categories`, `sources`, `companies`, `business_segments`, `payment_requests`, `availability_blocks`, and `resource_blocks` are independent parent streams
 - `resource_categories`, `resources`, `products`, `rate_groups`, `restrictions`, `product_service_orders`, and `age_categories` are children of `services` (partitioned by ServiceId)
+- `resource_category_assignments` is a child of `resource_categories` (partitioned by ServiceId and category)
 - `companionships` and `order_items` are children of `reservations` (order items use reservation IDs as `ServiceOrderIds`)
 - `bills` is a child of `order_items`, and `payments` is a child of `bills`
-- `reservations`, `customers`, `payment_requests`, `availability_blocks`, and `resource_blocks` use UpdatedUtc time interval filtering (max 3 months)
+- `reservations`, `customers`, `payment_requests`, `availability_blocks`, `resource_blocks`, and `resource_category_assignments` use UpdatedUtc time interval filtering (max 3 months)
 
 ## Installation
 
