@@ -1171,10 +1171,11 @@ class CompanionshipsStream(MewsChildStream):
         return body
 
 
-class OrderItemsStream(MewsChildStream):
+class OrderItemsStream(MewsStream):
     """Stream for order items.
 
-    Child stream of Reservations - uses ServiceOrderIds (reservation IDs) to query order items.
+    Independent stream that queries all order items using UpdatedUtc time interval.
+    Captures items from ALL services (accommodation, F&B outlets, spa, etc.).
     """
 
     name = "order_items"
@@ -1182,7 +1183,40 @@ class OrderItemsStream(MewsChildStream):
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "OrderItems"
-    parent_stream_type = ReservationsStream
+
+    @property
+    def partitions(self) -> list[dict] | None:
+        """Return 90-day windows from bookmark/start_date up to now."""
+        from datetime import datetime, timedelta, timezone
+
+        max_interval = timedelta(days=90)
+        now = datetime.now(timezone.utc)
+
+        start = self.get_starting_timestamp(context=None)
+        if start is None:
+            start_str = self.config.get("start_date")
+            if start_str:
+                start = datetime.fromisoformat(str(start_str).replace("Z", "+00:00"))
+            else:
+                start = now - max_interval
+
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+
+        if start > now:
+            start = now - max_interval
+
+        partitions: list[dict] = []
+        cursor = start
+        while cursor < now:
+            window_end = min(cursor + max_interval, now)
+            partitions.append({"window_start": cursor, "window_end": window_end})
+            cursor = window_end
+
+        if not partitions:
+            partitions.append({"window_start": start, "window_end": now})
+
+        return partitions
 
     schema = th.PropertiesList(
         th.Property("Id", th.StringType, description="Unique identifier"),
@@ -1261,27 +1295,64 @@ class OrderItemsStream(MewsChildStream):
         context: dict | None,
         next_page_token: str | None,
     ) -> dict | None:
-        """Prepare request payload with ServiceOrderIds filter.
+        """Prepare request payload with UpdatedUtc time interval filter.
 
-        Order items are queried using ServiceOrderIds (reservation IDs from parent).
-        We override the default ServiceIds logic from MewsChildStream.
+        Order items are queried using UpdatedUtc time interval (max 3 months).
+        This captures ALL order items across all services.
         """
-        # Start with base payload (ClientToken, AccessToken, Client, Limitation)
-        body = {
-            "ClientToken": self.config["client_token"],
-            "AccessToken": self.config["access_token"],
-            "Client": self.config.get("client_name", "BBGMeltano 1.0.0"),
-            "Limitation": {
-                "Count": self.page_size,
-            },
+        from datetime import datetime, timedelta, timezone
+
+        body = super().prepare_request_payload(context, next_page_token)
+
+        # Add EnterpriseIds filter
+        enterprise_ids = self.config.get("enterprise_ids")
+        if enterprise_ids:
+            body["EnterpriseIds"] = (
+                enterprise_ids if isinstance(enterprise_ids, list) else [enterprise_ids]
+            )
+
+        max_interval = timedelta(days=90)
+        now = datetime.now(timezone.utc)
+
+        window_start = None
+        window_end = None
+        if context:
+            window_start = context.get("window_start")
+            window_end = context.get("window_end")
+
+        if window_start is None or window_end is None:
+            derived_start = self.get_starting_timestamp(context)
+            if derived_start is None:
+                start_date_str = self.config.get("start_date")
+                if start_date_str:
+                    derived_start = datetime.fromisoformat(
+                        str(start_date_str).replace("Z", "+00:00")
+                    )
+                else:
+                    derived_start = now - max_interval
+
+            if derived_start.tzinfo is None:
+                derived_start = derived_start.replace(tzinfo=timezone.utc)
+
+            window_start = max(derived_start, now - max_interval)
+            window_end = min(window_start + max_interval, now)
+
+        if window_start.tzinfo is None:
+            window_start = window_start.replace(tzinfo=timezone.utc)
+        if window_end.tzinfo is None:
+            window_end = window_end.replace(tzinfo=timezone.utc)
+
+        start_utc = window_start.isoformat(timespec="seconds").replace("+00:00", "Z")
+        end_utc = window_end.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+        body["UpdatedUtc"] = {
+            "StartUtc": start_utc,
+            "EndUtc": end_utc,
         }
 
-        if next_page_token:
-            body["Limitation"]["Cursor"] = next_page_token
-
-        # Add ServiceOrderIds filter (reservation IDs from parent context)
-        if context and "reservation_id" in context:
-            body["ServiceOrderIds"] = [context["reservation_id"]]
+        self.logger.info(
+            f"Querying order_items with UpdatedUtc: {start_utc} to {end_utc}"
+        )
 
         return body
 
