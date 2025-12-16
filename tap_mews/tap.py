@@ -102,6 +102,7 @@ class TapMews(Tap):
             BusinessSegmentsStream(self),
             PaymentRequestsStream(self),
             PaymentsStream(self),  # Independent - captures all payments including unbilled
+            BillsStream(self),  # Independent - captures all bills
             AvailabilityBlocksStream(self),
             ResourceBlocksStream(self),
             ResourceCategoryAssignmentsStream(self),
@@ -116,8 +117,6 @@ class TapMews(Tap):
             # Reservation-dependent child streams
             CompanionshipsStream(self),
             OrderItemsStream(self),
-            # Order Item-dependent child streams
-            BillsStream(self),
         ]
 
 
