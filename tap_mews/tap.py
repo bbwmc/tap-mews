@@ -88,7 +88,6 @@ class TapMews(Tap):
                 "Deposit",
                 "Guest",
                 "City",
-                "NonRevenue",
             ],
             description="Accounting ledger types to query in the ledger_balances stream.",
         ),
