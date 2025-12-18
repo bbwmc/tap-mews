@@ -38,6 +38,9 @@ plugins:
         - name: enterprise_ids
           kind: array
           description: List of Enterprise IDs to query (used for reservations and other enterprise-scoped endpoints)
+        - name: ledger_types
+          kind: array
+          description: Accounting ledger types to query in the ledger_balances stream
         - name: progress_log_enabled
           kind: boolean
           value: true

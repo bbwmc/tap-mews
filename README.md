@@ -11,6 +11,7 @@ Singer tap for [Mews PMS API](https://mews-systems.gitbook.io/connector-api), bu
 | reservations        | /reservations/getAll/2023-06-06  | Id          | UpdatedUtc      | -                |
 | rates               | /rates/getAll                    | Id          | UpdatedUtc      | -                |
 | accounting_categories | /accountingCategories/getAll   | Id          | UpdatedUtc      | -                |
+| ledger_balances     | /ledgerBalances/getAll           | EnterpriseId, Date, LedgerType | Date | - |
 | sources             | /sources/getAll                  | Id          | UpdatedUtc      | -                |
 | companies           | /companies/getAll                | Id          | UpdatedUtc      | -                |
 | business_segments   | /businessSegments/getAll         | Id          | UpdatedUtc      | -                |
@@ -31,7 +32,7 @@ Singer tap for [Mews PMS API](https://mews-systems.gitbook.io/connector-api), bu
 | payments            | /payments/getAll                 | Id          | UpdatedUtc      | bills            |
 
 **Stream Hierarchy:**
-- `services`, `customers`, `reservations`, `rates`, `accounting_categories`, `sources`, `companies`, `business_segments`, `payment_requests`, `availability_blocks`, and `resource_blocks` are independent parent streams
+- `services`, `customers`, `reservations`, `rates`, `accounting_categories`, `ledger_balances`, `sources`, `companies`, `business_segments`, `payment_requests`, `availability_blocks`, and `resource_blocks` are independent parent streams
 - `resource_categories`, `resources`, `products`, `rate_groups`, `restrictions`, `product_service_orders`, and `age_categories` are children of `services` (partitioned by ServiceId)
 - `resource_category_assignments` is a child of `resource_categories` (partitioned by ServiceId and category)
 - `companionships` and `order_items` are children of `reservations` (order items use reservation IDs as `ServiceOrderIds`)
@@ -65,12 +66,13 @@ plugins:
 | access_token | Yes      |                      | Mews API Access Token                                                        |
 | start_date   | Yes      |                      | Start date for retrieving reservations (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ) |
 | enterprise_ids | No     |                      | List of Enterprise IDs to scope certain requests (e.g., rates, sources, payment_requests) |
+| ledger_types  | No      |                      | Ledger types for the `ledger_balances` stream (defaults to all known types)              |
 | api_url      | No       | https://api.mews.com | Mews API base URL                                                            |
 | client_name  | No       | BBGMeltano 1.0.0     | Client identifier sent with API requests                                     |
 | progress_log_enabled | No | true               | Enable periodic progress logs (includes ETA for time-window streams)         |
 | progress_log_interval_seconds | No | 60          | Minimum seconds between progress log lines per stream                        |
 
-**Note:** The Mews API has a 3-month maximum for date ranges. If your start_date is more than 3 months in the past, the tap will automatically cap the range and log a warning. Use incremental syncs with state to continue from where you left off.
+**Note:** The Mews API has a 3-month maximum for some time-window endpoints, and a 1-month maximum for `ledger_balances`. The tap partitions requests into allowed windows and uses state to continue from where it left off.
 
 ```bash
 meltano config tap-mews set client_token YOUR_CLIENT_TOKEN

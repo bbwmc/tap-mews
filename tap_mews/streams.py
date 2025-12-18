@@ -997,6 +997,161 @@ class AccountingCategoriesStream(MewsStream):
         return body
 
 
+class LedgerBalancesStream(MewsStream):
+    """Stream for ledger balances (opening/closing) by day."""
+
+    name = "ledger_balances"
+    path = "/ledgerBalances/getAll"
+    page_size = 100
+    primary_keys = ("EnterpriseId", "Date", "LedgerType")
+    replication_key = "Date"
+    records_key = "LedgerBalances"
+
+    @property
+    def partitions(self) -> list[dict] | None:
+        """Return 30-day date windows from bookmark/start_date up to today (UTC)."""
+        from datetime import datetime, timedelta, timezone
+
+        now = datetime.now(timezone.utc)
+        end_date = now.date()
+
+        start = self.get_starting_timestamp(context=None)
+        if start is None:
+            start_str = self.config.get("start_date")
+            if start_str:
+                start = datetime.fromisoformat(str(start_str).replace("Z", "+00:00"))
+            else:
+                start = now - timedelta(days=30)
+
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+
+        start_date = start.date()
+        if start_date > end_date:
+            start_date = end_date
+
+        partitions: list[dict] = []
+        cursor_date = start_date
+        while cursor_date <= end_date:
+            window_end_date = min(cursor_date + timedelta(days=29), end_date)
+            partitions.append(
+                {
+                    "window_start": datetime(
+                        cursor_date.year,
+                        cursor_date.month,
+                        cursor_date.day,
+                        tzinfo=timezone.utc,
+                    ),
+                    "window_end": datetime(
+                        window_end_date.year,
+                        window_end_date.month,
+                        window_end_date.day,
+                        tzinfo=timezone.utc,
+                    ),
+                }
+            )
+            cursor_date = window_end_date + timedelta(days=1)
+
+        if not partitions:
+            partitions.append({"window_start": now, "window_end": now})
+
+        return partitions
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        """Prepare request payload with date interval, ledger types, and enterprise filter."""
+        from datetime import datetime, timezone
+
+        body = super().prepare_request_payload(context, next_page_token)
+
+        ledger_types = self.config.get("ledger_types") or [
+            "Revenue",
+            "Tax",
+            "Payment",
+            "Deposit",
+            "Guest",
+            "City",
+            "NonRevenue",
+        ]
+        if isinstance(ledger_types, str):
+            ledger_types = [ledger_types]
+
+        body["LedgerTypes"] = list(ledger_types)
+
+        enterprise_ids = self.config.get("enterprise_ids")
+        if enterprise_ids:
+            body["EnterpriseIds"] = (
+                enterprise_ids if isinstance(enterprise_ids, list) else [enterprise_ids]
+            )
+
+        window_start = context.get("window_start") if context else None
+        window_end = context.get("window_end") if context else None
+        if not isinstance(window_start, datetime) or not isinstance(window_end, datetime):
+            raise ValueError(
+                "ledger_balances requires partition context with window_start/window_end"
+            )
+
+        start_date = window_start.astimezone(timezone.utc).date()
+        end_date = window_end.astimezone(timezone.utc).date()
+
+        body["Date"] = {"Start": start_date.isoformat(), "End": end_date.isoformat()}
+
+        return body
+
+    _amount_schema = th.ObjectType(
+        th.Property("Currency", th.StringType),
+        th.Property("NetValue", th.NumberType),
+        th.Property("GrossValue", th.NumberType),
+        th.Property(
+            "TaxValues",
+            th.ArrayType(
+                th.ObjectType(
+                    th.Property("Code", th.StringType),
+                    th.Property("Value", th.NumberType),
+                )
+            ),
+        ),
+        th.Property(
+            "Breakdown",
+            th.ObjectType(
+                th.Property(
+                    "Items",
+                    th.ArrayType(
+                        th.ObjectType(
+                            th.Property("TaxRateCode", th.StringType),
+                            th.Property("NetValue", th.NumberType),
+                            th.Property("TaxValue", th.NumberType),
+                        )
+                    ),
+                )
+            ),
+        ),
+    )
+
+    schema = th.PropertiesList(
+        th.Property(
+            "EnterpriseId",
+            th.StringType,
+            description="Unique identifier of the Enterprise.",
+        ),
+        th.Property("Date", th.DateType, description="Day for which the ledger balance applies."),
+        th.Property("LedgerType", th.StringType, description="Type of accounting ledger."),
+        th.Property(
+            "OpeningBalance",
+            _amount_schema,
+            description="Opening balance at the start of the day.",
+        ),
+        th.Property(
+            "ClosingBalance",
+            _amount_schema,
+            description="Closing balance at the end of the day.",
+        ),
+    ).to_dict()
+
+
 class BusinessSegmentsStream(MewsStream):
     """Stream for business segments."""
 
@@ -2161,4 +2316,3 @@ class ResourceCategoryAssignmentsStream(MewsChildStream):
         th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp (UTC)"),
         th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp (UTC)"),
     ).to_dict()
-
