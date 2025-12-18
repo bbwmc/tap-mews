@@ -1074,7 +1074,6 @@ class LedgerBalancesStream(MewsStream):
             "Deposit",
             "Guest",
             "City",
-            "NonRevenue",
         ]
         if isinstance(ledger_types, str):
             ledger_types = [ledger_types]
