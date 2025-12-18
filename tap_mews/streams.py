@@ -1009,8 +1009,9 @@ class LedgerBalancesStream(MewsStream):
 
     @property
     def partitions(self) -> list[dict] | None:
-        """Return 30-day date windows from bookmark/start_date up to today (UTC)."""
+        """Return calendar-month date windows from bookmark/start_date up to today (UTC)."""
         from datetime import datetime, timedelta, timezone
+        import calendar
 
         now = datetime.now(timezone.utc)
         end_date = now.date()
@@ -1033,7 +1034,11 @@ class LedgerBalancesStream(MewsStream):
         partitions: list[dict] = []
         cursor_date = start_date
         while cursor_date <= end_date:
-            window_end_date = min(cursor_date + timedelta(days=29), end_date)
+            last_day = calendar.monthrange(cursor_date.year, cursor_date.month)[1]
+            window_end_date = min(
+                cursor_date.replace(day=last_day),
+                end_date,
+            )
             partitions.append(
                 {
                     "window_start": datetime(
@@ -1078,7 +1083,18 @@ class LedgerBalancesStream(MewsStream):
         if isinstance(ledger_types, str):
             ledger_types = [ledger_types]
 
-        body["LedgerTypes"] = list(ledger_types)
+        filtered_ledger_types = [
+            ledger_type
+            for ledger_type in ledger_types
+            if str(ledger_type).lower() != "nonrevenue".lower()
+        ]
+        if len(filtered_ledger_types) != len(list(ledger_types)):
+            self.logger.warning(
+                "Removing unsupported LedgerType=%s from ledger_balances request",
+                "NonRevenue",
+            )
+
+        body["LedgerTypes"] = list(filtered_ledger_types)
 
         enterprise_ids = self.config.get("enterprise_ids")
         if enterprise_ids:
