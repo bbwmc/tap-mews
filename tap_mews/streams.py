@@ -1098,6 +1098,27 @@ class LedgerBalancesStream(MewsStream):
 
         body["Date"] = {"Start": start_date.isoformat(), "End": end_date.isoformat()}
 
+        # Log request params once per partition (not for every paginated page).
+        if next_page_token is None:
+            self.logger.info(
+                "Querying ledger_balances with Date=%s..%s, LedgerTypes=%s, EnterpriseIds=%s",
+                body["Date"]["Start"],
+                body["Date"]["End"],
+                body.get("LedgerTypes"),
+                body.get("EnterpriseIds"),
+            )
+
+            import json
+
+            safe_body = {
+                k: v for k, v in body.items() if k not in ["ClientToken", "AccessToken"]
+            }
+            safe_body["ClientToken"] = "***"
+            safe_body["AccessToken"] = "***"
+            self.logger.info(
+                "Full ledger_balances request body: %s", json.dumps(safe_body, indent=2)
+            )
+
         return body
 
     _amount_schema = th.ObjectType(
