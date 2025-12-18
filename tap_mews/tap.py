@@ -82,6 +82,18 @@ class TapMews(Tap):
             required=False,
             description="List of Resource Category IDs to query in resource_category_assignments stream",
         ),
+        th.Property(
+            "progress_log_enabled",
+            th.BooleanType,
+            default=True,
+            description="Enable periodic progress logs (with ETA for time-window streams).",
+        ),
+        th.Property(
+            "progress_log_interval_seconds",
+            th.IntegerType,
+            default=60,
+            description="Minimum seconds between progress log lines per stream.",
+        ),
     ).to_dict()
 
     def discover_streams(self) -> list[Stream]:

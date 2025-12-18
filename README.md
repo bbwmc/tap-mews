@@ -67,6 +67,8 @@ plugins:
 | enterprise_ids | No     |                      | List of Enterprise IDs to scope certain requests (e.g., rates, sources, payment_requests) |
 | api_url      | No       | https://api.mews.com | Mews API base URL                                                            |
 | client_name  | No       | BBGMeltano 1.0.0     | Client identifier sent with API requests                                     |
+| progress_log_enabled | No | true               | Enable periodic progress logs (includes ETA for time-window streams)         |
+| progress_log_interval_seconds | No | 60          | Minimum seconds between progress log lines per stream                        |
 
 **Note:** The Mews API has a 3-month maximum for date ranges. If your start_date is more than 3 months in the past, the tap will automatically cap the range and log a warning. Use incremental syncs with state to continue from where you left off.
 

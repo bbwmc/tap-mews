@@ -38,3 +38,11 @@ plugins:
         - name: enterprise_ids
           kind: array
           description: List of Enterprise IDs to query (used for reservations and other enterprise-scoped endpoints)
+        - name: progress_log_enabled
+          kind: boolean
+          value: true
+          description: Enable periodic progress logs (with ETA for time-window streams)
+        - name: progress_log_interval_seconds
+          kind: integer
+          value: 60
+          description: Minimum seconds between progress log lines per stream
