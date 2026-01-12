@@ -131,6 +131,7 @@ class TapMews(Tap):
             PaymentRequestsStream(self),
             PaymentsStream(self),  # Independent - captures all payments including unbilled
             BillsStream(self),  # Independent - captures all bills
+            ProductServiceOrdersStream(self),  # Independent - captures all PSOs
             LedgerBalancesStream(self),
             AvailabilityBlocksStream(self),
             ResourceBlocksStream(self),
@@ -140,7 +141,6 @@ class TapMews(Tap):
             RateGroupsStream(self),
             RestrictionsStream(self),
             AgeCategoriesStream(self),
-            ProductServiceOrdersStream(self),
             ResourceCategoriesStream(self),
             ResourcesStream(self),
             # Reservation-dependent child streams

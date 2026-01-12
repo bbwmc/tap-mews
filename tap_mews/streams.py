@@ -892,15 +892,18 @@ class RestrictionsStream(MewsChildStream):
         return body
 
 
-class ProductServiceOrdersStream(MewsChildStream):
-    """Stream for product service orders."""
+class ProductServiceOrdersStream(MewsStream):
+    """Stream for product service orders.
+
+    Independent stream that queries all product service orders using UpdatedUtc time interval.
+    Not a child of ServicesStream - the API doesn't support ServiceIds filtering.
+    """
 
     name = "product_service_orders"
     path = "/productServiceOrders/getAll"
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "ProductServiceOrders"
-    parent_stream_type = ServicesStream
 
     schema = th.PropertiesList(
         th.Property("Id", th.StringType, description="Product service order identifier"),
@@ -924,44 +927,97 @@ class ProductServiceOrdersStream(MewsChildStream):
         th.Property("Options", th.ObjectType(), description="Service order options"),
     ).to_dict()
 
+    @property
+    def partitions(self) -> list[dict] | None:
+        """Return 90-day windows from bookmark/start_date up to now."""
+        from datetime import datetime, timedelta, timezone
+
+        max_interval = timedelta(days=90)
+        now = datetime.now(timezone.utc)
+
+        start = self.get_starting_timestamp(context=None)
+        if start is None:
+            start_str = self.config.get("start_date")
+            if start_str:
+                start = datetime.fromisoformat(str(start_str).replace("Z", "+00:00"))
+            else:
+                start = now - max_interval
+
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+
+        if start > now:
+            start = now - max_interval
+
+        partitions: list[dict] = []
+        cursor = start
+        while cursor < now:
+            window_end = min(cursor + max_interval, now)
+            partitions.append({"window_start": cursor, "window_end": window_end})
+            cursor = window_end
+
+        if not partitions:
+            partitions.append({"window_start": start, "window_end": now})
+
+        return partitions
+
     def prepare_request_payload(
         self,
         context: dict | None,
         next_page_token: str | None,
     ) -> dict | None:
-        """Prepare request payload with service, enterprise, and date filters."""
+        """Prepare request payload with enterprise and date filters."""
         from datetime import datetime, timedelta, timezone
 
         body = super().prepare_request_payload(context, next_page_token)
 
+        # Add EnterpriseIds filter
         enterprise_ids = self.config.get("enterprise_ids")
         if enterprise_ids:
             body["EnterpriseIds"] = (
                 enterprise_ids if isinstance(enterprise_ids, list) else [enterprise_ids]
             )
 
-        start_date_str = self.config.get("start_date")
-        if start_date_str:
-            if isinstance(start_date_str, str):
-                start_date = datetime.fromisoformat(start_date_str.replace("Z", "+00:00"))
-            else:
-                start_date = start_date_str
+        # Use window-based filtering from partitions
+        max_interval = timedelta(days=90)
+        now = datetime.now(timezone.utc)
 
-            if start_date.tzinfo is None:
-                start_date = start_date.replace(tzinfo=timezone.utc)
+        window_start = None
+        window_end = None
+        if context:
+            window_start = context.get("window_start")
+            window_end = context.get("window_end")
 
-            end_date = datetime.now(timezone.utc)
-            max_interval = timedelta(days=90)
-            if (end_date - start_date) > max_interval:
-                end_date = start_date + max_interval
-                self.logger.warning(
-                    "Date range exceeds 3-month API limit. "
-                    f"Capping to {start_date.date()} - {end_date.date()}."
-                )
+        if window_start is None or window_end is None:
+            derived_start = self.get_starting_timestamp(context)
+            if derived_start is None:
+                start_date_str = self.config.get("start_date")
+                if start_date_str:
+                    derived_start = datetime.fromisoformat(
+                        str(start_date_str).replace("Z", "+00:00")
+                    )
+                else:
+                    derived_start = now - max_interval
 
-            start_utc = start_date.isoformat(timespec="seconds").replace("+00:00", "Z")
-            end_utc = end_date.isoformat(timespec="seconds").replace("+00:00", "Z")
-            body["UpdatedUtc"] = {"StartUtc": start_utc, "EndUtc": end_utc}
+            if derived_start.tzinfo is None:
+                derived_start = derived_start.replace(tzinfo=timezone.utc)
+
+            window_start = max(derived_start, now - max_interval)
+            window_end = min(window_start + max_interval, now)
+
+        if window_start.tzinfo is None:
+            window_start = window_start.replace(tzinfo=timezone.utc)
+        if window_end.tzinfo is None:
+            window_end = window_end.replace(tzinfo=timezone.utc)
+
+        start_utc = window_start.isoformat(timespec="seconds").replace("+00:00", "Z")
+        end_utc = window_end.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+        body["UpdatedUtc"] = {"StartUtc": start_utc, "EndUtc": end_utc}
+
+        self.logger.info(
+            f"Querying product_service_orders with UpdatedUtc: {start_utc} to {end_utc}"
+        )
 
         return body
 
