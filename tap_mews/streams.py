@@ -896,7 +896,7 @@ class ProductServiceOrdersStream(MewsStream):
     """Stream for product service orders.
 
     Independent stream that queries all product service orders using UpdatedUtc time interval.
-    Not a child of ServicesStream - the API doesn't support ServiceIds filtering.
+    The API requires ServiceIds, so we fetch all Orderable services and pass their IDs.
     """
 
     name = "product_service_orders"
@@ -904,6 +904,9 @@ class ProductServiceOrdersStream(MewsStream):
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "ProductServiceOrders"
+
+    # Cache for orderable service IDs (fetched once per sync)
+    _orderable_service_ids: list[str] | None = None
 
     schema = th.PropertiesList(
         th.Property("Id", th.StringType, description="Product service order identifier"),
@@ -927,10 +930,55 @@ class ProductServiceOrdersStream(MewsStream):
         th.Property("Options", th.ObjectType(), description="Service order options"),
     ).to_dict()
 
+    def _fetch_orderable_service_ids(self) -> list[str]:
+        """Fetch all Orderable service IDs from the API.
+
+        Returns:
+            List of service IDs for Orderable-type services.
+        """
+        import requests
+
+        if self._orderable_service_ids is not None:
+            return self._orderable_service_ids
+
+        url = f"{self.url_base}/services/getAll"
+        body = {
+            "ClientToken": self.config["client_token"],
+            "AccessToken": self.config["access_token"],
+            "Client": self.config.get("client_name", "BBGMeltano 1.0.0"),
+            "Limitation": {"Count": 1000},
+        }
+
+        enterprise_ids = self.config.get("enterprise_ids")
+        if enterprise_ids:
+            body["EnterpriseIds"] = (
+                enterprise_ids if isinstance(enterprise_ids, list) else [enterprise_ids]
+            )
+
+        self.logger.info("Fetching Orderable service IDs for product_service_orders")
+        response = requests.post(url, json=body, timeout=60)
+        response.raise_for_status()
+
+        data = response.json()
+        services = data.get("Services", [])
+
+        # Filter to only Orderable services (Type == "Orderable")
+        orderable_ids = [s["Id"] for s in services if s.get("Type") == "Orderable"]
+        self.logger.info(f"Found {len(orderable_ids)} Orderable services")
+
+        self._orderable_service_ids = orderable_ids
+        return orderable_ids
+
     @property
     def partitions(self) -> list[dict] | None:
         """Return 90-day windows from bookmark/start_date up to now."""
         from datetime import datetime, timedelta, timezone
+
+        # First check if we have any Orderable services
+        service_ids = self._fetch_orderable_service_ids()
+        if not service_ids:
+            self.logger.warning("No Orderable services found, skipping product_service_orders")
+            return []
 
         max_interval = timedelta(days=90)
         now = datetime.now(timezone.utc)
@@ -966,10 +1014,17 @@ class ProductServiceOrdersStream(MewsStream):
         context: dict | None,
         next_page_token: str | None,
     ) -> dict | None:
-        """Prepare request payload with enterprise and date filters."""
+        """Prepare request payload with ServiceIds, enterprise, and date filters."""
         from datetime import datetime, timedelta, timezone
 
         body = super().prepare_request_payload(context, next_page_token)
+
+        # Add ALL Orderable ServiceIds (required by API)
+        service_ids = self._fetch_orderable_service_ids()
+        if service_ids:
+            body["ServiceIds"] = service_ids
+        else:
+            self.logger.warning("No Orderable service IDs available")
 
         # Add EnterpriseIds filter
         enterprise_ids = self.config.get("enterprise_ids")
@@ -1016,7 +1071,8 @@ class ProductServiceOrdersStream(MewsStream):
         body["UpdatedUtc"] = {"StartUtc": start_utc, "EndUtc": end_utc}
 
         self.logger.info(
-            f"Querying product_service_orders with UpdatedUtc: {start_utc} to {end_utc}"
+            f"Querying product_service_orders with {len(service_ids)} ServiceIds, "
+            f"UpdatedUtc: {start_utc} to {end_utc}"
         )
 
         return body
