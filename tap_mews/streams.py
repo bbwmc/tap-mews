@@ -345,8 +345,11 @@ class ReservationsStream(MewsStream):
     ).to_dict()
 
     def get_child_context(self, record: dict, context: dict | None) -> dict:
-        """Pass reservation_id to child streams (Order Items)."""
-        return {"reservation_id": record["Id"]}
+        """Pass reservation_id and group_id to child streams."""
+        return {
+            "reservation_id": record["Id"],
+            "group_id": record.get("GroupId"),
+        }
 
     def prepare_request_payload(
         self,
@@ -1360,6 +1363,62 @@ class CompanionshipsStream(MewsChildStream):
             body["ReservationIds"] = [context["reservation_id"]]
 
         return body
+
+
+class ReservationGroupsStream(MewsChildStream):
+    """Stream for reservation groups, child of reservations.
+
+    Fetches reservation group details for GroupIds found in reservations.
+    Handles deduplication to avoid redundant API calls for the same group.
+    """
+
+    name = "reservation_groups"
+    path = "/reservationGroups/getAll"
+    primary_keys = ("Id",)
+    replication_key = None  # No incremental - fetched via parent
+    records_key = "ReservationGroups"
+    parent_stream_type = ReservationsStream
+    requires_service_id = False
+
+    # Track processed group IDs to avoid duplicate API calls
+    _seen_group_ids: set[str] = set()
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Unique identifier of the reservation group"),
+        th.Property("EnterpriseId", th.StringType, description="Enterprise the reservation group belongs to"),
+        th.Property("Name", th.StringType, description="Name of the reservation group"),
+        th.Property("ChannelManager", th.StringType, description="Name of the corresponding channel manager"),
+        th.Property("ChannelManagerGroupNumber", th.StringType, description="Identifier of the channel manager"),
+    ).to_dict()
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        """Prepare request with ReservationGroupIds."""
+        body = super().prepare_request_payload(context, next_page_token)
+        group_id = context.get("group_id") if context else None
+        if group_id:
+            body["ReservationGroupIds"] = [group_id]
+        return body
+
+    def request_records(self, context: dict | None):
+        """Override to skip requests for missing or duplicate group IDs."""
+        group_id = context.get("group_id") if context else None
+
+        # Skip if no group_id (reservation had no group)
+        if not group_id:
+            return
+
+        # Skip if already processed (deduplication)
+        if group_id in self._seen_group_ids:
+            return
+
+        # Mark as seen before making request
+        self._seen_group_ids.add(group_id)
+
+        yield from super().request_records(context)
 
 
 class OrderItemsStream(MewsStream):
