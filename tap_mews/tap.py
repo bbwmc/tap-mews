@@ -15,6 +15,7 @@ from tap_mews.streams import (
     CompanionshipsStream,
     CustomersStream,
     LedgerBalancesStream,
+    LedgerEntriesStream,
     OrderItemsStream,
     PaymentRequestsStream,
     PaymentsStream,
@@ -133,6 +134,7 @@ class TapMews(Tap):
             BillsStream(self),  # Independent - captures all bills
             ProductServiceOrdersStream(self),  # Independent - captures all PSOs
             LedgerBalancesStream(self),
+            LedgerEntriesStream(self),
             AvailabilityBlocksStream(self),
             ResourceBlocksStream(self),
             ResourceCategoryAssignmentsStream(self),
