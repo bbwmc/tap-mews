@@ -1124,10 +1124,9 @@ class LedgerBalancesStream(MewsStream):
 
     @property
     def partitions(self) -> list[dict] | None:
-        """Return 7-day date windows from bookmark/start_date up to today (UTC)."""
+        """Return daily date windows from bookmark/start_date up to today (UTC)."""
         from datetime import datetime, timedelta, timezone
 
-        max_interval = timedelta(days=7)
         now = datetime.now(timezone.utc)
         end_date = now.date()
 
@@ -1149,7 +1148,6 @@ class LedgerBalancesStream(MewsStream):
         partitions: list[dict] = []
         cursor_date = start_date
         while cursor_date <= end_date:
-            window_end_date = min(cursor_date + max_interval - timedelta(days=1), end_date)
             partitions.append(
                 {
                     "window_start": datetime(
@@ -1159,14 +1157,14 @@ class LedgerBalancesStream(MewsStream):
                         tzinfo=timezone.utc,
                     ),
                     "window_end": datetime(
-                        window_end_date.year,
-                        window_end_date.month,
-                        window_end_date.day,
+                        cursor_date.year,
+                        cursor_date.month,
+                        cursor_date.day,
                         tzinfo=timezone.utc,
                     ),
                 }
             )
-            cursor_date = window_end_date + timedelta(days=1)
+            cursor_date = cursor_date + timedelta(days=1)
 
         if not partitions:
             partitions.append({"window_start": now, "window_end": now})
@@ -1311,10 +1309,9 @@ class LedgerEntriesStream(MewsStream):
 
     @property
     def partitions(self) -> list[dict] | None:
-        """Return 7-day date windows from bookmark/start_date up to today (UTC)."""
+        """Return daily date windows from bookmark/start_date up to today (UTC)."""
         from datetime import datetime, timedelta, timezone
 
-        max_interval = timedelta(days=7)
         now = datetime.now(timezone.utc)
         end_date = now.date()
 
@@ -1336,7 +1333,6 @@ class LedgerEntriesStream(MewsStream):
         partitions: list[dict] = []
         cursor_date = start_date
         while cursor_date <= end_date:
-            window_end_date = min(cursor_date + max_interval - timedelta(days=1), end_date)
             partitions.append(
                 {
                     "window_start": datetime(
@@ -1346,14 +1342,14 @@ class LedgerEntriesStream(MewsStream):
                         tzinfo=timezone.utc,
                     ),
                     "window_end": datetime(
-                        window_end_date.year,
-                        window_end_date.month,
-                        window_end_date.day,
+                        cursor_date.year,
+                        cursor_date.month,
+                        cursor_date.day,
                         tzinfo=timezone.utc,
                     ),
                 }
             )
-            cursor_date = window_end_date + timedelta(days=1)
+            cursor_date = cursor_date + timedelta(days=1)
 
         if not partitions:
             partitions.append({"window_start": now, "window_end": now})
