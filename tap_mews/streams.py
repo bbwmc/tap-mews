@@ -1124,10 +1124,10 @@ class LedgerBalancesStream(MewsStream):
 
     @property
     def partitions(self) -> list[dict] | None:
-        """Return calendar-month date windows from bookmark/start_date up to today (UTC)."""
+        """Return 7-day date windows from bookmark/start_date up to today (UTC)."""
         from datetime import datetime, timedelta, timezone
-        import calendar
 
+        max_interval = timedelta(days=7)
         now = datetime.now(timezone.utc)
         end_date = now.date()
 
@@ -1149,11 +1149,7 @@ class LedgerBalancesStream(MewsStream):
         partitions: list[dict] = []
         cursor_date = start_date
         while cursor_date <= end_date:
-            last_day = calendar.monthrange(cursor_date.year, cursor_date.month)[1]
-            window_end_date = min(
-                cursor_date.replace(day=last_day),
-                end_date,
-            )
+            window_end_date = min(cursor_date + max_interval - timedelta(days=1), end_date)
             partitions.append(
                 {
                     "window_start": datetime(
