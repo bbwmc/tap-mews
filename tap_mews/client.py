@@ -373,6 +373,19 @@ class MewsStream(RESTStream):
                     yield from data[key]
                     break
 
+    def validate_response(self, response: requests.Response) -> None:
+        """Validate HTTP response, treating 408 timeouts as retriable.
+
+        The Mews API sometimes returns 408 "Transaction has timed out" errors
+        when under load. These should be retried rather than treated as fatal.
+        """
+        if response.status_code == 408:
+            from singer_sdk.exceptions import RetriableAPIError
+
+            msg = self.response_error_message(response)
+            raise RetriableAPIError(msg, response)
+        super().validate_response(response)
+
     def get_url_params(
         self,
         context: dict | None,
