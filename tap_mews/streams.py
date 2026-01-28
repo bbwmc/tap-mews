@@ -1563,7 +1563,10 @@ class CompaniesStream(MewsStream):
     ).to_dict()
 
 class CompanionshipsStream(MewsChildStream):
-    """Stream for companionships linked to reservations."""
+    """Stream for companionships linked to reservations.
+
+    Uses smaller page size to reduce API timeout risk.
+    """
 
     name = "companionships"
     path = "/companionships/getAll"
@@ -1572,6 +1575,7 @@ class CompanionshipsStream(MewsChildStream):
     records_key = "Companionships"
     parent_stream_type = ReservationsStream
     requires_service_id = False
+    page_size = 100  # Reduced from 1000 to minimize timeout risk
 
     schema = th.PropertiesList(
         th.Property("Id", th.StringType, description="Companionship identifier"),

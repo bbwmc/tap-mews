@@ -106,6 +106,24 @@ class MewsStream(RESTStream):
     _progress: _ProgressState | None = None
 
     @property
+    def backoff_max_tries(self) -> int:
+        """Return the maximum number of retry attempts for failed requests.
+
+        Increased from default (5) to handle Mews API timeout issues (408 errors)
+        which can occur during high load periods.
+        """
+        return 10
+
+    def backoff_wait_generator(self):
+        """Return an exponential backoff generator with longer initial wait.
+
+        Uses exponential backoff starting at 10 seconds (instead of default 2)
+        to give the Mews API more time to recover from timeout conditions.
+        """
+        import backoff
+        return backoff.expo(base=2, factor=10)
+
+    @property
     def url_base(self) -> str:
         """Return the base URL for the API."""
         return f"{self.config.get('api_url', 'https://api.mews.com')}/api/connector/v1"
