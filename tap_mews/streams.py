@@ -5,9 +5,26 @@ Each stream corresponds to a Mews API endpoint.
 
 from __future__ import annotations
 
+import logging
+from typing import Iterable
+
 from singer_sdk import typing as th
 
 from tap_mews.client import MewsChildStream, MewsStream
+
+logger = logging.getLogger(__name__)
+
+# Module-level collectors for batched child streams
+# These accumulate IDs during ReservationsStream sync for efficient batched API calls
+_reservation_ids_collector: list[str] = []
+_group_ids_collector: set[str] = set()
+
+
+def reset_id_collectors() -> None:
+    """Reset collectors at start of sync. Called by ReservationsStream."""
+    global _reservation_ids_collector, _group_ids_collector
+    _reservation_ids_collector = []
+    _group_ids_collector = set()
 
 
 def _require_enterprise_ids(config: dict, stream_name: str) -> list[str]:
@@ -239,6 +256,7 @@ class ReservationsStream(MewsStream):
     """Stream for reservations.
 
     Independent stream that queries all reservations using EnterpriseIds.
+    Also populates ID collectors for batched child streams (companionships, reservation_groups).
     """
 
     name = "reservations"
@@ -251,6 +269,9 @@ class ReservationsStream(MewsStream):
     def partitions(self) -> list[dict] | None:
         """Return 90-day windows from bookmark/start_date up to now."""
         from datetime import datetime, timedelta, timezone
+
+        # Reset collectors at start of sync (partitions is called first)
+        reset_id_collectors()
 
         max_interval = timedelta(days=90)
         now = datetime.now(timezone.utc)
@@ -345,10 +366,24 @@ class ReservationsStream(MewsStream):
     ).to_dict()
 
     def get_child_context(self, record: dict, context: dict | None) -> dict:
-        """Pass reservation_id and group_id to child streams."""
+        """Collect IDs for batched child streams and pass context.
+
+        Populates module-level collectors that CompanionshipsStream and
+        ReservationGroupsStream use for efficient batched API calls.
+        """
+        global _reservation_ids_collector, _group_ids_collector
+
+        reservation_id = record["Id"]
+        group_id = record.get("GroupId")
+
+        # Collect IDs for batched streams
+        _reservation_ids_collector.append(reservation_id)
+        if group_id:
+            _group_ids_collector.add(group_id)
+
         return {
-            "reservation_id": record["Id"],
-            "group_id": record.get("GroupId"),
+            "reservation_id": reservation_id,
+            "group_id": group_id,
         }
 
     def prepare_request_payload(
@@ -1562,10 +1597,11 @@ class CompaniesStream(MewsStream):
         th.Property("IsUpdatedByMe", th.BooleanType, description="Flag indicating if updated by this client"),
     ).to_dict()
 
-class CompanionshipsStream(MewsChildStream):
+class CompanionshipsStream(MewsStream):
     """Stream for companionships linked to reservations.
 
-    Uses smaller page size to reduce API timeout risk.
+    Batches reservation IDs (up to 1000 per API call) for efficiency.
+    Reads IDs from module-level collector populated by ReservationsStream.
     """
 
     name = "companionships"
@@ -1573,9 +1609,10 @@ class CompanionshipsStream(MewsChildStream):
     primary_keys = ("Id",)
     replication_key = None
     records_key = "Companionships"
-    parent_stream_type = ReservationsStream
     requires_service_id = False
-    page_size = 100  # Reduced from 1000 to minimize timeout risk
+
+    # Batch size for API calls (Mews limit is 1000)
+    BATCH_SIZE = 1000
 
     schema = th.PropertiesList(
         th.Property("Id", th.StringType, description="Companionship identifier"),
@@ -1591,36 +1628,71 @@ class CompanionshipsStream(MewsChildStream):
         th.Property("Customers", th.ArrayType(th.ObjectType()), description="Customer payload"),
     ).to_dict()
 
+    @property
+    def partitions(self) -> list[dict] | None:
+        """Return batches of reservation IDs as partitions."""
+        global _reservation_ids_collector
+
+        if not _reservation_ids_collector:
+            # No reservations collected yet - return empty partition
+            # This can happen if reservations stream hasn't run
+            return [{"batch_ids": []}]
+
+        # Create partitions with batches of IDs
+        ids = _reservation_ids_collector
+        partitions = []
+        for i in range(0, len(ids), self.BATCH_SIZE):
+            batch = ids[i : i + self.BATCH_SIZE]
+            partitions.append({"batch_ids": batch})
+
+        logger.info(
+            f"CompanionshipsStream: {len(ids)} reservation IDs in {len(partitions)} batches"
+        )
+        return partitions
+
     def prepare_request_payload(
         self,
         context: dict | None,
         next_page_token: str | None,
     ) -> dict | None:
+        """Prepare request payload with batched ReservationIds."""
         body = super().prepare_request_payload(context, next_page_token)
 
-        if context and "reservation_id" in context:
-            body["ReservationIds"] = [context["reservation_id"]]
+        if context and "batch_ids" in context:
+            batch_ids = context["batch_ids"]
+            if batch_ids:
+                body["ReservationIds"] = batch_ids
 
         return body
 
+    def get_records(self, context: dict | None) -> Iterable[dict]:
+        """Fetch companionships for a batch of reservation IDs."""
+        batch_ids = context.get("batch_ids", []) if context else []
 
-class ReservationGroupsStream(MewsChildStream):
-    """Stream for reservation groups, child of reservations.
+        if not batch_ids:
+            logger.debug("CompanionshipsStream: No IDs in batch, skipping")
+            return
 
-    Fetches reservation group details for GroupIds found in reservations.
-    Handles deduplication to avoid redundant API calls for the same group.
+        logger.info(f"CompanionshipsStream: Fetching for {len(batch_ids)} reservation IDs")
+        yield from self.request_records(context)
+
+
+class ReservationGroupsStream(MewsStream):
+    """Stream for reservation groups.
+
+    Batches group IDs (up to 1000 per API call) for efficiency.
+    Reads unique group IDs from module-level collector populated by ReservationsStream.
     """
 
     name = "reservation_groups"
     path = "/reservationGroups/getAll"
     primary_keys = ("Id",)
-    replication_key = None  # No incremental - fetched via parent
+    replication_key = None  # No incremental - fetched via collected IDs
     records_key = "ReservationGroups"
-    parent_stream_type = ReservationsStream
     requires_service_id = False
 
-    # Track processed group IDs to avoid duplicate API calls
-    _seen_group_ids: set[str] = set()
+    # Batch size for API calls (Mews limit is 1000)
+    BATCH_SIZE = 1000
 
     schema = th.PropertiesList(
         th.Property("Id", th.StringType, description="Unique identifier of the reservation group"),
@@ -1630,34 +1702,52 @@ class ReservationGroupsStream(MewsChildStream):
         th.Property("ChannelManagerGroupNumber", th.StringType, description="Identifier of the channel manager"),
     ).to_dict()
 
+    @property
+    def partitions(self) -> list[dict] | None:
+        """Return batches of group IDs as partitions."""
+        global _group_ids_collector
+
+        if not _group_ids_collector:
+            # No groups collected yet - return empty partition
+            return [{"batch_ids": []}]
+
+        # Create partitions with batches of IDs (already deduplicated in set)
+        ids = list(_group_ids_collector)
+        partitions = []
+        for i in range(0, len(ids), self.BATCH_SIZE):
+            batch = ids[i : i + self.BATCH_SIZE]
+            partitions.append({"batch_ids": batch})
+
+        logger.info(
+            f"ReservationGroupsStream: {len(ids)} unique group IDs in {len(partitions)} batches"
+        )
+        return partitions
+
     def prepare_request_payload(
         self,
         context: dict | None,
         next_page_token: str | None,
     ) -> dict | None:
-        """Prepare request with ReservationGroupIds."""
+        """Prepare request with batched ReservationGroupIds."""
         body = super().prepare_request_payload(context, next_page_token)
-        group_id = context.get("group_id") if context else None
-        if group_id:
-            body["ReservationGroupIds"] = [group_id]
+
+        if context and "batch_ids" in context:
+            batch_ids = context["batch_ids"]
+            if batch_ids:
+                body["ReservationGroupIds"] = batch_ids
+
         return body
 
-    def request_records(self, context: dict | None):
-        """Override to skip requests for missing or duplicate group IDs."""
-        group_id = context.get("group_id") if context else None
+    def get_records(self, context: dict | None) -> Iterable[dict]:
+        """Fetch reservation groups for a batch of group IDs."""
+        batch_ids = context.get("batch_ids", []) if context else []
 
-        # Skip if no group_id (reservation had no group)
-        if not group_id:
+        if not batch_ids:
+            logger.debug("ReservationGroupsStream: No IDs in batch, skipping")
             return
 
-        # Skip if already processed (deduplication)
-        if group_id in self._seen_group_ids:
-            return
-
-        # Mark as seen before making request
-        self._seen_group_ids.add(group_id)
-
-        yield from super().request_records(context)
+        logger.info(f"ReservationGroupsStream: Fetching {len(batch_ids)} group IDs")
+        yield from self.request_records(context)
 
 
 class OrderItemsStream(MewsStream):
