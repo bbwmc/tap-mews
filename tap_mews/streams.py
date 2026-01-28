@@ -264,7 +264,6 @@ class ReservationsStream(MewsStream):
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "Reservations"
-    parallel_partitions = True
 
     @property
     def partitions(self) -> list[dict] | None:
@@ -470,7 +469,6 @@ class CustomersStream(MewsStream):
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "Customers"
-    parallel_partitions = True
 
     @property
     def partitions(self) -> list[dict] | None:
@@ -941,7 +939,6 @@ class ProductServiceOrdersStream(MewsStream):
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "ProductServiceOrders"
-    parallel_partitions = True
 
     # Cache for orderable service IDs (fetched once per sync)
     _orderable_service_ids: list[str] | None = None
@@ -1765,7 +1762,6 @@ class OrderItemsStream(MewsStream):
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "OrderItems"
-    parallel_partitions = True
 
     @property
     def partitions(self) -> list[dict] | None:
@@ -1952,7 +1948,6 @@ class BillsStream(MewsStream):
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "Bills"
-    parallel_partitions = True
 
     @property
     def partitions(self) -> list[dict] | None:
@@ -2092,7 +2087,6 @@ class PaymentsStream(MewsStream):
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "Payments"
-    parallel_partitions = True
 
     @property
     def partitions(self) -> list[dict] | None:
@@ -2251,7 +2245,6 @@ class PaymentRequestsStream(MewsStream):
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "PaymentRequests"
-    parallel_partitions = True
 
     @property
     def partitions(self) -> list[dict] | None:
@@ -2408,7 +2401,6 @@ class AvailabilityBlocksStream(MewsStream):
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "AvailabilityBlocks"
-    parallel_partitions = True
 
     schema = th.PropertiesList(
         th.Property("Id", th.StringType, description="Availability block identifier"),
@@ -2572,7 +2564,6 @@ class ResourceBlocksStream(MewsStream):
     primary_keys = ("Id",)
     replication_key = "UpdatedUtc"
     records_key = "ResourceBlocks"
-    parallel_partitions = True
 
     @property
     def partitions(self) -> list[dict] | None:
