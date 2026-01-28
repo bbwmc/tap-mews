@@ -6,13 +6,17 @@ and cursor-based pagination via the Limitation object.
 
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 import logging
 import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+import aiohttp
 import requests
+from requests.adapters import HTTPAdapter
 from singer_sdk.streams import RESTStream
 
 if TYPE_CHECKING:
@@ -104,6 +108,26 @@ class MewsStream(RESTStream):
     requires_service_id: bool = False
 
     _progress: _ProgressState | None = None
+    _session: requests.Session | None = None
+
+    def __init__(self, tap: Tap):
+        super().__init__(tap)
+        self._session = requests.Session()
+        # Configure session for connection pooling
+        adapter = HTTPAdapter(
+            pool_connections=20,
+            pool_maxsize=100,
+            max_retries=0  # We handle retries ourselves
+        )
+        self._session.mount("https://", adapter)
+        self._session.mount("http://", adapter)
+
+    @property
+    def requests_session(self) -> requests.Session:
+        """Return the session for connection pooling."""
+        if self._session is None:
+            self._session = requests.Session()
+        return self._session
 
     @property
     def backoff_max_tries(self) -> int:
@@ -122,6 +146,38 @@ class MewsStream(RESTStream):
         """
         import backoff
         return backoff.expo(base=2, factor=10)
+
+    def _request(
+        self,
+        method: str,
+        url: str,
+        headers: dict | None = None,
+        params: dict | None = None,
+        json: dict | None = None,
+        **kwargs,
+    ) -> requests.Response:
+        """Make a request using the session for connection pooling.
+
+        Args:
+            method: HTTP method
+            url: Request URL
+            headers: Request headers
+            params: Query parameters
+            json: Request body
+            **kwargs: Additional arguments
+
+        Returns:
+            HTTP response
+        """
+        headers = headers or self.http_headers
+        return self.requests_session.request(
+            method=method,
+            url=url,
+            headers=headers,
+            params=params,
+            json=json,
+            **kwargs,
+        )
 
     @property
     def url_base(self) -> str:
@@ -411,6 +467,83 @@ class MewsStream(RESTStream):
     ) -> dict[str, Any]:
         """Return URL query parameters (empty for Mews, uses POST body)."""
         return {}
+
+    @property
+    def parallel_partitions(self) -> bool:
+        """Enable parallel partition processing for time-windowed streams.
+        
+        Returns True for streams that benefit from concurrent partition fetching.
+        """
+        return False
+
+    def _process_partition_parallel(
+        self,
+        context: dict | None,
+    ) -> list[dict]:
+        """Process a single partition and return records as a list.
+        
+        This method is used for parallel partition processing.
+        
+        Args:
+            context: Partition context.
+            
+        Returns:
+            List of records from the partition.
+        """
+        records = []
+        try:
+            for record in self.request_records(context):
+                records.append(record)
+        except Exception as e:
+            logger.warning(f"Error processing partition {context}: {e}")
+        return records
+
+    def sync_records(self, context: dict | None = None) -> None:
+        """Sync records, processing partitions in parallel if enabled.
+        
+        This overrides the default SDK behavior to process partitions concurrently
+        for streams that support parallel processing.
+        
+        Args:
+            context: Optional partition context.
+        """
+        if not self.parallel_partitions or context is not None:
+            # Use default SDK behavior for sequential processing
+            yield from super().sync_records(context)
+            return
+
+        # Get all partitions
+        partitions = self.partitions or [{}]
+        if not partitions or (len(partitions) == 1 and not partitions[0]):
+            # No partitions or single empty partition - use default
+            yield from super().sync_records(context)
+            return
+
+        # Process partitions in parallel using thread pool
+        max_workers = min(8, len(partitions))  # Limit concurrent requests
+        logger.info(f"Processing {len(partitions)} partitions in parallel with {max_workers} workers")
+        
+        all_records = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all partition processing tasks
+            future_to_partition = {
+                executor.submit(self._process_partition_parallel, part): part 
+                for part in partitions
+            }
+            
+            # Collect results as they complete
+            for future in as_completed(future_to_partition):
+                partition = future_to_partition[future]
+                try:
+                    records = future.result()
+                    all_records.extend(records)
+                    logger.info(f"Completed partition with {len(records)} records")
+                except Exception as e:
+                    logger.error(f"Partition processing failed: {e}")
+
+        # Yield all records
+        logger.info(f"Total records from all partitions: {len(all_records)}")
+        yield from all_records
 
 
 class MewsChildStream(MewsStream):
