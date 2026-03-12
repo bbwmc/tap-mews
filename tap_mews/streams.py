@@ -365,26 +365,34 @@ class ReservationsStream(MewsStream):
         ),
     ).to_dict()
 
-    def get_child_context(self, record: dict, context: dict | None) -> dict:
-        """Collect IDs for batched child streams and pass context.
+    def post_process(
+        self,
+        row: dict,
+        context: dict | None = None,
+    ) -> dict | None:
+        """Collect IDs for batched streams after processing each record.
 
         Populates module-level collectors that CompanionshipsStream and
         ReservationGroupsStream use for efficient batched API calls.
+
+        Note: We use post_process instead of get_child_context because
+        get_child_context is only called when there are child streams with
+        parent_stream_type defined. These collector-based streams don't use
+        the parent-child relationship, so we need post_process which is
+        always called for every record.
         """
         global _reservation_ids_collector, _group_ids_collector
 
-        reservation_id = record["Id"]
-        group_id = record.get("GroupId")
+        reservation_id = row.get("Id")
+        group_id = row.get("GroupId")
 
         # Collect IDs for batched streams
-        _reservation_ids_collector.append(reservation_id)
+        if reservation_id:
+            _reservation_ids_collector.append(reservation_id)
         if group_id:
             _group_ids_collector.add(group_id)
 
-        return {
-            "reservation_id": reservation_id,
-            "group_id": group_id,
-        }
+        return row
 
     def prepare_request_payload(
         self,
