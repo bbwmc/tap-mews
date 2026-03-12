@@ -20,13 +20,6 @@ _reservation_ids_collector: list[str] = []
 _group_ids_collector: set[str] = set()
 
 
-def reset_id_collectors() -> None:
-    """Reset collectors at start of sync. Called by ReservationsStream."""
-    global _reservation_ids_collector, _group_ids_collector
-    _reservation_ids_collector = []
-    _group_ids_collector = set()
-
-
 def _require_enterprise_ids(config: dict, stream_name: str) -> list[str]:
     """Return enterprise IDs from config or raise if missing."""
 
@@ -265,13 +258,13 @@ class ReservationsStream(MewsStream):
     replication_key = "UpdatedUtc"
     records_key = "Reservations"
 
+    # Track if collectors have been reset this sync
+    _collectors_cleared: bool = False
+
     @property
     def partitions(self) -> list[dict] | None:
         """Return 90-day windows from bookmark/start_date up to now."""
         from datetime import datetime, timedelta, timezone
-
-        # Reset collectors at start of sync (partitions is called first)
-        reset_id_collectors()
 
         max_interval = timedelta(days=90)
         now = datetime.now(timezone.utc)
@@ -382,6 +375,14 @@ class ReservationsStream(MewsStream):
         always called for every record.
         """
         global _reservation_ids_collector, _group_ids_collector
+
+        # Clear collectors on first record of this sync
+        # (can't do this in partitions because it's accessed multiple times)
+        if not self._collectors_cleared:
+            _reservation_ids_collector = []
+            _group_ids_collector = set()
+            self._collectors_cleared = True
+            logger.info("ReservationsStream: Cleared ID collectors for new sync")
 
         reservation_id = row.get("Id")
         group_id = row.get("GroupId")
