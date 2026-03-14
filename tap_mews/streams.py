@@ -1612,18 +1612,16 @@ class CompanionshipsStream(MewsStream):
     Batches reservation IDs (up to 1000 per API call) for efficiency.
     Reads IDs from module-level collector populated by ReservationsStream.
 
-    This is a child stream of ReservationsStream to ensure it runs AFTER
-    reservations are synced (Singer SDK syncs streams alphabetically, so
-    without this, 'companionships' would run before 'reservations').
+    Stream name prefixed with 'zz_' to ensure it sorts alphabetically AFTER
+    'reservations' (Singer SDK syncs streams in alphabetical order).
     """
 
-    name = "companionships"
+    name = "zz_companionships"  # Prefixed to sort after 'reservations'
     path = "/companionships/getAll"
     primary_keys = ("Id",)
     replication_key = None
     records_key = "Companionships"
     requires_service_id = False
-    parent_stream_type: type[MewsStream] | None = None  # Set after ReservationsStream is defined
 
     # Batch size for API calls (Mews limit is 1000)
     BATCH_SIZE = 1000
@@ -1693,18 +1691,16 @@ class ReservationGroupsStream(MewsStream):
     Batches group IDs (up to 1000 per API call) for efficiency.
     Reads unique group IDs from module-level collector populated by ReservationsStream.
 
-    Note: We don't use partitions because they're evaluated before ReservationsStream
-    syncs. Instead, we handle all batching in get_records which runs after
-    ReservationsStream has populated the collector.
+    Stream name prefixed with 'zz_' to ensure it sorts alphabetically AFTER
+    'reservations' (Singer SDK syncs streams in alphabetical order).
     """
 
-    name = "reservation_groups"
+    name = "zz_reservation_groups"  # Prefixed to sort after 'reservations'
     path = "/reservationGroups/getAll"
     primary_keys = ("Id",)
     replication_key = None  # No incremental - fetched via collected IDs
     records_key = "ReservationGroups"
     requires_service_id = False
-    parent_stream_type: type[MewsStream] | None = None  # Set after ReservationsStream is defined
 
     # Batch size for API calls (Mews limit is 1000)
     BATCH_SIZE = 1000
@@ -2752,10 +2748,4 @@ class ResourceCategoryAssignmentsStream(MewsChildStream):
         th.Property("CreatedUtc", th.DateTimeType, description="Creation timestamp (UTC)"),
         th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp (UTC)"),
     ).to_dict()
-
-
-# Set parent_stream_type after all classes are defined to avoid forward reference issues
-# This ensures these streams run AFTER ReservationsStream (Singer SDK syncs alphabetically)
-CompanionshipsStream.parent_stream_type = ReservationsStream
-ReservationGroupsStream.parent_stream_type = ReservationsStream
 
