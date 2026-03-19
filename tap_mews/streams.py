@@ -393,8 +393,9 @@ class ReservationsStream(MewsStream):
     ) -> dict | None:
         """Prepare request payload with time interval filtering.
 
-        The reservations endpoint requires UpdatedUtc time interval
-        with a maximum of 3 months. We enforce this limit to avoid API errors
+        The reservations endpoint uses CollidingUtc time interval to return
+        all reservations whose stay period overlaps with the specified interval.
+        Maximum interval is 3 months. We enforce this limit to avoid API errors
         while covering the full historical range via chunked partitions.
         """
         from datetime import datetime, timedelta, timezone
@@ -439,13 +440,13 @@ class ReservationsStream(MewsStream):
         start_utc = window_start.isoformat(timespec='seconds').replace("+00:00", "Z")
         end_utc = window_end.isoformat(timespec='seconds').replace("+00:00", "Z")
 
-        body["UpdatedUtc"] = {
+        body["CollidingUtc"] = {
             "StartUtc": start_utc,
             "EndUtc": end_utc,
         }
 
         self.logger.info(
-            f"Querying reservations with UpdatedUtc: {start_utc} to {end_utc}"
+            f"Querying reservations with CollidingUtc: {start_utc} to {end_utc}"
         )
 
         # Log the full request body (masking sensitive data)
