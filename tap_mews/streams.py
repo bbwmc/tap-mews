@@ -2675,12 +2675,22 @@ class ResourceBlocksStream(MewsStream):
 
 
 class ResourceCategoryAssignmentsStream(MewsChildStream):
-    """Stream for resource category assignments."""
+    """Stream for resource category assignments.
+
+    Unlike most Mews streams, this does NOT use an UpdatedUtc filter.
+    Assignments are rarely updated (e.g. Vienna's were last touched Nov 2025)
+    and the Mews API enforces a 90-day max on UpdatedUtc windows, which means
+    a time-windowed query returns 0 rows for properties whose assignments
+    haven't changed recently.  A full pull per category is cheap (typically
+    tens of rows) and guarantees we always have the complete mapping from
+    resource (bed/room) to category -- essential for resolving a reservation's
+    *assigned* room type vs its *requested* room type.
+    """
 
     name = "resource_category_assignments"
     path = "/resourceCategoryAssignments/getAll"
     primary_keys = ("Id",)
-    replication_key = "UpdatedUtc"
+    replication_key = None  # full-table; no incremental bookmark
     records_key = "ResourceCategoryAssignments"
     parent_stream_type = ResourceCategoriesStream
     requires_service_id = True
@@ -2690,9 +2700,13 @@ class ResourceCategoryAssignmentsStream(MewsChildStream):
         context: dict | None,
         next_page_token: str | None,
     ) -> dict | None:
-        """Prepare request payload scoped to a resource category with date window."""
-        from datetime import datetime, timedelta, timezone
+        """Prepare request payload scoped to a resource category.
 
+        No UpdatedUtc filter is applied -- assignments change infrequently and
+        the 90-day API limit would silently drop rows that haven't been touched
+        recently.  Each category typically has only tens of assignments so the
+        full pull is lightweight.
+        """
         body = super().prepare_request_payload(context, next_page_token)
 
         # ResourceCategoryIds is required by the API; derive from parent context.
@@ -2710,25 +2724,6 @@ class ResourceCategoryAssignmentsStream(MewsChildStream):
 
         # Include both active and deleted records to capture full history.
         body["ActivityStates"] = ["Active", "Deleted"]
-
-        max_interval = timedelta(days=90)
-        now = datetime.now(timezone.utc)
-
-        start = self.get_starting_timestamp(context)
-        if start is None:
-            start_str = self.config.get("start_date")
-            start = datetime.fromisoformat(str(start_str).replace("Z", "+00:00")) if start_str else now - max_interval
-
-        if start.tzinfo is None:
-            start = start.replace(tzinfo=timezone.utc)
-
-        window_start = max(start, now - max_interval)
-        window_end = min(window_start + max_interval, now)
-
-        start_utc = window_start.isoformat(timespec="seconds").replace("+00:00", "Z")
-        end_utc = window_end.isoformat(timespec="seconds").replace("+00:00", "Z")
-
-        body["UpdatedUtc"] = {"StartUtc": start_utc, "EndUtc": end_utc}
 
         return body
 
