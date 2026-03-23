@@ -11,6 +11,8 @@ Singer tap for [Mews PMS API](https://mews-systems.gitbook.io/connector-api), bu
 | reservations        | /reservations/getAll/2023-06-06  | Id          | UpdatedUtc      | -                |
 | rates               | /rates/getAll                    | Id          | UpdatedUtc      | -                |
 | accounting_categories | /accountingCategories/getAll   | Id          | UpdatedUtc      | -                |
+| taxations           | /taxations/getAll               | Code        | None            | -                |
+| tax_environments    | /taxEnvironments/getAll         | Code        | None            | -                |
 | ledger_balances     | /ledgerBalances/getAll           | EnterpriseId, Date, LedgerType | Date | - |
 | sources             | /sources/getAll                  | Id          | UpdatedUtc      | -                |
 | companies           | /companies/getAll                | Id          | UpdatedUtc      | -                |
@@ -32,12 +34,13 @@ Singer tap for [Mews PMS API](https://mews-systems.gitbook.io/connector-api), bu
 | payments            | /payments/getAll                 | Id          | UpdatedUtc      | bills            |
 
 **Stream Hierarchy:**
-- `services`, `customers`, `reservations`, `rates`, `accounting_categories`, `ledger_balances`, `sources`, `companies`, `business_segments`, `payment_requests`, `availability_blocks`, and `resource_blocks` are independent parent streams
+- `services`, `customers`, `reservations`, `rates`, `accounting_categories`, `taxations`, `tax_environments`, `ledger_balances`, `sources`, `companies`, `business_segments`, `payment_requests`, `availability_blocks`, and `resource_blocks` are independent parent streams
 - `resource_categories`, `resources`, `products`, `rate_groups`, `restrictions`, `product_service_orders`, and `age_categories` are children of `services` (partitioned by ServiceId)
 - `resource_category_assignments` is a child of `resource_categories` (partitioned by ServiceId and category)
 - `companionships` and `order_items` are children of `reservations` (order items use reservation IDs as `ServiceOrderIds`)
 - `bills` is a child of `order_items`, and `payments` is a child of `bills`
 - `reservations`, `customers`, `payment_requests`, `availability_blocks`, `resource_blocks`, and `resource_category_assignments` use UpdatedUtc time interval filtering (max 3 months)
+- `taxations` and `tax_environments` are full-refresh reference streams because the Mews API does not expose incremental cursors or updated timestamps for these endpoints
 
 ## Installation
 

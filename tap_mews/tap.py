@@ -30,8 +30,10 @@ from tap_mews.streams import (
     ResourceCategoryAssignmentsStream,
     ResourcesStream,
     RestrictionsStream,
-    SourcesStream,
     ServicesStream,
+    SourcesStream,
+    TaxationsStream,
+    TaxEnvironmentsStream,
 )
 
 
@@ -126,6 +128,8 @@ class TapMews(Tap):
             ReservationsStream(self),
             RatesStream(self),
             AccountingCategoriesStream(self),
+            TaxationsStream(self),
+            TaxEnvironmentsStream(self),
             SourcesStream(self),
             CompaniesStream(self),
             BusinessSegmentsStream(self),

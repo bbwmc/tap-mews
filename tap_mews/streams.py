@@ -6,7 +6,7 @@ Each stream corresponds to a Mews API endpoint.
 from __future__ import annotations
 
 import logging
-from typing import Iterable
+from collections.abc import Iterable
 
 from singer_sdk import typing as th
 
@@ -40,6 +40,46 @@ def _require_enterprise_ids(config: dict, stream_name: str) -> list[str]:
         return list(enterprise_ids)
 
     return [enterprise_ids]
+
+
+def _tax_values_schema() -> th.ArrayType:
+    """Return the shared schema for Mews tax values arrays."""
+
+    return th.ArrayType(
+        th.ObjectType(
+            th.Property("Code", th.StringType),
+            th.Property("Value", th.NumberType),
+        )
+    )
+
+
+def _tax_breakdown_items_schema() -> th.ArrayType:
+    """Return the shared schema for Mews tax breakdown items."""
+
+    return th.ArrayType(
+        th.ObjectType(
+            th.Property("TaxRateCode", th.StringType),
+            th.Property("NetValue", th.NumberType),
+            th.Property("TaxValue", th.NumberType),
+        )
+    )
+
+
+def _tax_amount_schema() -> th.ObjectType:
+    """Return the shared schema for Mews amount objects with tax detail."""
+
+    return th.ObjectType(
+        th.Property("Currency", th.StringType),
+        th.Property("NetValue", th.NumberType),
+        th.Property("GrossValue", th.NumberType),
+        th.Property("TaxValues", _tax_values_schema()),
+        th.Property(
+            "Breakdown",
+            th.ObjectType(
+                th.Property("Items", _tax_breakdown_items_schema()),
+            ),
+        ),
+    )
 
 
 
@@ -220,28 +260,11 @@ class ProductsStream(MewsChildStream):
                 th.Property("Currency", th.StringType),
                 th.Property("NetValue", th.NumberType),
                 th.Property("GrossValue", th.NumberType),
-                th.Property(
-                    "TaxValues",
-                    th.ArrayType(
-                        th.ObjectType(
-                            th.Property("Code", th.StringType),
-                            th.Property("Value", th.NumberType),
-                        ),
-                    ),
-                ),
+                th.Property("TaxValues", _tax_values_schema()),
                 th.Property(
                     "Breakdown",
                     th.ObjectType(
-                        th.Property(
-                            "Items",
-                            th.ArrayType(
-                                th.ObjectType(
-                                    th.Property("TaxRateCode", th.StringType),
-                                    th.Property("NetValue", th.NumberType),
-                                    th.Property("TaxValue", th.NumberType),
-                                ),
-                            ),
-                        ),
+                        th.Property("Items", _tax_breakdown_items_schema()),
                     ),
                 ),
             ),
@@ -1147,6 +1170,144 @@ class AccountingCategoriesStream(MewsStream):
         return body
 
 
+class TaxationsStream(MewsStream):
+    """Stream for Mews taxations with nested tax rate reference data."""
+
+    name = "taxations"
+    path = "/taxations/getAll"
+    primary_keys = ("Code",)
+    replication_key = None
+    requires_service_id = False
+
+    schema = th.PropertiesList(
+        th.Property("Code", th.StringType, description="Taxation code"),
+        th.Property("Name", th.StringType, description="Taxation name"),
+        th.Property("LocalName", th.StringType, description="Localized taxation name"),
+        th.Property(
+            "TaxRates",
+            th.ArrayType(
+                th.ObjectType(
+                    th.Property("Code", th.StringType, description="Tax rate code"),
+                    th.Property(
+                        "TaxationCode",
+                        th.StringType,
+                        description="Parent taxation code",
+                    ),
+                    th.Property("Value", th.NumberType, description="Configured tax rate value"),
+                    th.Property(
+                        "ValidityInvervalsUtc",
+                        th.ArrayType(
+                            th.ObjectType(
+                                th.Property("StartUtc", th.DateTimeType),
+                                th.Property("EndUtc", th.DateTimeType),
+                            )
+                        ),
+                        description="Optional validity windows for the tax rate",
+                    ),
+                    th.Property(
+                        "Strategy",
+                        th.ObjectType(
+                            th.Property("Discriminator", th.StringType),
+                            th.Property(
+                                "Value",
+                                th.ObjectType(
+                                    th.Property("Value", th.NumberType),
+                                    th.Property("CurrencyCode", th.StringType),
+                                    th.Property(
+                                        "BaseTaxationCodes",
+                                        th.ArrayType(th.StringType),
+                                    ),
+                                ),
+                            ),
+                        ),
+                        description="Tax strategy metadata from Mews",
+                    ),
+                )
+            ),
+            description="Tax rates available for this taxation",
+        ),
+    ).to_dict()
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        """Prepare request payload for the unpaginated taxations endpoint."""
+        body = super().prepare_request_payload(context, next_page_token)
+        body.pop("Limitation", None)
+        return body
+
+    def parse_response(self, response) -> list[dict]:
+        """Parse taxations and attach matching tax rates to each taxation."""
+        data = response.json()
+        taxations = data.get("Taxations", [])
+        tax_rates = data.get("TaxRates", [])
+
+        tax_rates_by_taxation: dict[str, list[dict]] = {}
+        for tax_rate in tax_rates:
+            taxation_code = tax_rate.get("TaxationCode")
+            if taxation_code is None:
+                continue
+            tax_rates_by_taxation.setdefault(taxation_code, []).append(tax_rate)
+
+        records = []
+        for taxation in taxations:
+            record = dict(taxation)
+            record["TaxRates"] = tax_rates_by_taxation.get(record.get("Code"), [])
+            records.append(record)
+
+        if self._progress_enabled():
+            progress = self._get_progress()
+            progress.stream_records += len(records)
+            if progress.active_partition_id:
+                progress.active_partition_records += len(records)
+            self._maybe_log_progress()
+
+        yield from records
+
+
+class TaxEnvironmentsStream(MewsStream):
+    """Stream for Mews tax environment reference data."""
+
+    name = "tax_environments"
+    path = "/taxEnvironments/getAll"
+    primary_keys = ("Code",)
+    replication_key = None
+    records_key = "TaxEnvironments"
+    requires_service_id = False
+
+    schema = th.PropertiesList(
+        th.Property("Code", th.StringType, description="Tax environment code"),
+        th.Property("CountryCode", th.StringType, description="ISO 3166-1 alpha-3 country code"),
+        th.Property(
+            "ValidityStartUtc",
+            th.DateTimeType,
+            description="Start of the tax environment validity window",
+        ),
+        th.Property(
+            "ValidityEndUtc",
+            th.DateTimeType,
+            description="End of the tax environment validity window",
+        ),
+        th.Property(
+            "TaxationCodes",
+            th.ArrayType(th.StringType),
+            description="Taxation codes available in the environment",
+        ),
+    ).to_dict()
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        """Prepare request payload for the unpaginated tax environments endpoint."""
+        body = super().prepare_request_payload(context, next_page_token)
+        body.pop("Limitation", None)
+        return body
+
+
 class LedgerBalancesStream(MewsStream):
     """Stream for ledger balances (opening/closing) by day."""
 
@@ -1281,35 +1442,7 @@ class LedgerBalancesStream(MewsStream):
 
         return body
 
-    _amount_schema = th.ObjectType(
-        th.Property("Currency", th.StringType),
-        th.Property("NetValue", th.NumberType),
-        th.Property("GrossValue", th.NumberType),
-        th.Property(
-            "TaxValues",
-            th.ArrayType(
-                th.ObjectType(
-                    th.Property("Code", th.StringType),
-                    th.Property("Value", th.NumberType),
-                )
-            ),
-        ),
-        th.Property(
-            "Breakdown",
-            th.ObjectType(
-                th.Property(
-                    "Items",
-                    th.ArrayType(
-                        th.ObjectType(
-                            th.Property("TaxRateCode", th.StringType),
-                            th.Property("NetValue", th.NumberType),
-                            th.Property("TaxValue", th.NumberType),
-                        )
-                    ),
-                )
-            ),
-        ),
-    )
+    _amount_schema = _tax_amount_schema()
 
     schema = th.PropertiesList(
         th.Property(
@@ -1810,27 +1943,9 @@ class OrderItemsStream(MewsStream):
         th.Property("BillingName", th.StringType, description="Billing name"),
         th.Property("ExternalIdentifier", th.StringType, description="External identifier"),
         th.Property("UnitCount", th.IntegerType, description="Unit count"),
-        th.Property("UnitAmount", th.ObjectType(
-            th.Property("Currency", th.StringType),
-            th.Property("NetValue", th.NumberType),
-            th.Property("GrossValue", th.NumberType),
-            th.Property("TaxValues", th.ArrayType(th.ObjectType())),
-            th.Property("Breakdown", th.ObjectType()),
-        ), description="Unit amount"),
-        th.Property("Amount", th.ObjectType(
-            th.Property("Currency", th.StringType),
-            th.Property("NetValue", th.NumberType),
-            th.Property("GrossValue", th.NumberType),
-            th.Property("TaxValues", th.ArrayType(th.ObjectType())),
-            th.Property("Breakdown", th.ObjectType()),
-        ), description="Total amount"),
-        th.Property("OriginalAmount", th.ObjectType(
-            th.Property("Currency", th.StringType),
-            th.Property("NetValue", th.NumberType),
-            th.Property("GrossValue", th.NumberType),
-            th.Property("TaxValues", th.ArrayType(th.ObjectType())),
-            th.Property("Breakdown", th.ObjectType()),
-        ), description="Original amount"),
+        th.Property("UnitAmount", _tax_amount_schema(), description="Unit amount"),
+        th.Property("Amount", _tax_amount_schema(), description="Total amount"),
+        th.Property("OriginalAmount", _tax_amount_schema(), description="Original amount"),
         th.Property("RevenueType", th.StringType, description="Revenue type"),
         th.Property("CreatorProfileId", th.StringType, description="Creator profile ID"),
         th.Property("UpdaterProfileId", th.StringType, description="Updater profile ID"),
@@ -2336,8 +2451,8 @@ class PaymentRequestsStream(MewsStream):
         next_page_token: str | None,
     ) -> dict | None:
         """Prepare request payload with optional enterprise filter and date window."""
-        from datetime import datetime, timedelta, timezone
         import json
+        from datetime import datetime, timedelta, timezone
 
         body = super().prepare_request_payload(context, next_page_token)
 
@@ -2494,8 +2609,8 @@ class AvailabilityBlocksStream(MewsStream):
         next_page_token: str | None,
     ) -> dict | None:
         """Prepare request payload with enterprise filter and date window."""
-        from datetime import datetime, timedelta, timezone
         import json
+        from datetime import datetime, timedelta, timezone
 
         body = super().prepare_request_payload(context, next_page_token)
 
