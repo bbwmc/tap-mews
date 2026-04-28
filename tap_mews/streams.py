@@ -293,8 +293,12 @@ class ReservationsStream(MewsStream):
         """Return 90-day windows from bookmark/start_date up to now."""
         from datetime import datetime, timedelta, timezone
 
-        # Reset collectors at start of sync (partitions is called first)
-        reset_id_collectors()
+        # Reset collectors once at start of this stream instance's sync.
+        # Do not reset on every partitions property access: SDK/progress code may
+        # call this property repeatedly while reservations are already syncing.
+        if not getattr(self, "_id_collectors_reset", False):
+            reset_id_collectors()
+            self._id_collectors_reset = True
 
         max_interval = timedelta(days=90)
         now = datetime.now(timezone.utc)
@@ -1737,7 +1741,9 @@ class CompanionshipsStream(MewsStream):
     Reads IDs from module-level collector populated by ReservationsStream.
     """
 
-    name = "companionships"
+    # Prefix with zz__ so Singer SDK alphabetical stream ordering runs this
+    # after reservations, which populates _reservation_ids_collector.
+    name = "zz__companionships"
     path = "/companionships/getAll"
     primary_keys = ("Id",)
     replication_key = None
@@ -1817,7 +1823,9 @@ class ReservationGroupsStream(MewsStream):
     Reads unique group IDs from module-level collector populated by ReservationsStream.
     """
 
-    name = "reservation_groups"
+    # Prefix with zz__ so Singer SDK alphabetical stream ordering runs this
+    # after reservations, which populates _group_ids_collector.
+    name = "zz__reservation_groups"
     path = "/reservationGroups/getAll"
     primary_keys = ("Id",)
     replication_key = None  # No incremental - fetched via collected IDs
