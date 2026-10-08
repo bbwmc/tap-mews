@@ -31,6 +31,7 @@ from tap_mews.streams import (
     ResourcesStream,
     RestrictionsStream,
     ServicesStream,
+    SourceAssignmentsStream,
     SourcesStream,
     TaxationsStream,
     TaxEnvironmentsStream,
@@ -102,6 +103,15 @@ class TapMews(Tap):
             description="List of Resource Category IDs to query in resource_category_assignments stream",
         ),
         th.Property(
+            "source_assignments_enabled",
+            th.BooleanType,
+            default=False,
+            description=(
+                "Include the source_assignments stream (Mews Source assignments, beta). "
+                "Requires Mews to enable the sourceAssignments operation for the integration."
+            ),
+        ),
+        th.Property(
             "progress_log_enabled",
             th.BooleanType,
             default=True,
@@ -121,7 +131,7 @@ class TapMews(Tap):
         Returns:
             A list of stream instances.
         """
-        return [
+        streams: list[Stream] = [
             # Independent parent streams
             ServicesStream(self),
             CustomersStream(self),
@@ -154,6 +164,13 @@ class TapMews(Tap):
             ReservationGroupsStream(self),
             OrderItemsStream(self),
         ]
+
+        # Opt-in: the source_assignments operation is beta and permission-gated
+        # by Mews, so only expose it once the integration has been granted access.
+        if self.config.get("source_assignments_enabled"):
+            streams.append(SourceAssignmentsStream(self))
+
+        return streams
 
 
 if __name__ == "__main__":

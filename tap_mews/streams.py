@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 
+import requests
 from singer_sdk import typing as th
 
 from tap_mews.client import MewsChildStream, MewsStream
@@ -1655,6 +1656,167 @@ class SourcesStream(MewsStream):
         body = super().prepare_request_payload(context, next_page_token)
         body["EnterpriseIds"] = _require_enterprise_ids(self.config, self.name)
         return body
+
+
+class SourceAssignmentsStream(MewsStream):
+    """Stream for source assignments (reservation -> Source).
+
+    A Source is a booking engine / distribution channel (legacy Mews name:
+    "distributor"). It is the only place Mews exposes which booking engine a
+    direct reservation (Origin=Distributor) came from; the reservation object
+    itself carries no source identifier.
+
+    The operation is in beta-test and permission-gated by Mews. Until Mews
+    enables it for the integration, the API returns HTTP 401
+    "No permission to use this operation."; this stream logs a warning and
+    yields no records in that case so it cannot break the rest of the sync.
+    Enable it with the `source_assignments_enabled` tap setting.
+    """
+
+    name = "source_assignments"
+    path = "/sourceAssignments/getAll/2024-09-20"
+    primary_keys = ("Id",)
+    replication_key = "UpdatedUtc"
+    records_key = "SourceAssignments"
+
+    # Set once Mews denies the operation, so the remaining time-window
+    # partitions are skipped without another API call.
+    _permission_denied: bool = False
+
+    @property
+    def partitions(self) -> list[dict] | None:
+        """Return 30-day windows from bookmark/start_date up to now.
+
+        The Source assignments endpoint caps UpdatedUtc windows at 1 month.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        max_interval = timedelta(days=30)
+        now = datetime.now(timezone.utc)
+
+        start = self.get_starting_timestamp(context=None)
+        if start is None:
+            start_str = self.config.get("start_date")
+            if start_str:
+                start = datetime.fromisoformat(str(start_str).replace("Z", "+00:00"))
+            else:
+                start = now - max_interval
+
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+
+        if start > now:
+            start = now - max_interval
+
+        partitions: list[dict] = []
+        cursor = start
+        while cursor < now:
+            window_end = min(cursor + max_interval, now)
+            partitions.append({"window_start": cursor, "window_end": window_end})
+            cursor = window_end
+
+        if not partitions:
+            partitions.append({"window_start": start, "window_end": now})
+
+        return partitions
+
+    schema = th.PropertiesList(
+        th.Property("Id", th.StringType, description="Source assignment identifier"),
+        th.Property("ReservationId", th.StringType, description="Reservation identifier"),
+        th.Property(
+            "ReservationGroupId",
+            th.StringType,
+            description="Reservation group identifier (group-level operation only)",
+        ),
+        th.Property("SourceId", th.StringType, description="Source (booking engine) identifier"),
+        th.Property(
+            "IsPrimary",
+            th.BooleanType,
+            description="Whether this is the primary source for the reservation",
+        ),
+        th.Property("UpdatedUtc", th.DateTimeType, description="Last update timestamp"),
+    ).to_dict()
+
+    def prepare_request_payload(
+        self,
+        context: dict | None,
+        next_page_token: str | None,
+    ) -> dict | None:
+        """Prepare request with EnterpriseIds and a 1-month UpdatedUtc window."""
+        from datetime import datetime, timedelta, timezone
+
+        body = super().prepare_request_payload(context, next_page_token)
+
+        # The reservation-level endpoint accepts at most one EnterpriseId.
+        body["EnterpriseIds"] = _require_enterprise_ids(self.config, self.name)[:1]
+
+        max_interval = timedelta(days=30)
+        now = datetime.now(timezone.utc)
+
+        window_start = context.get("window_start") if context else None
+        window_end = context.get("window_end") if context else None
+
+        if window_start is None or window_end is None:
+            derived_start = self.get_starting_timestamp(context)
+            if derived_start is None:
+                start_date_str = self.config.get("start_date")
+                derived_start = (
+                    datetime.fromisoformat(str(start_date_str).replace("Z", "+00:00"))
+                    if start_date_str
+                    else now - max_interval
+                )
+            if derived_start.tzinfo is None:
+                derived_start = derived_start.replace(tzinfo=timezone.utc)
+            window_start = max(derived_start, now - max_interval)
+            window_end = min(window_start + max_interval, now)
+
+        if window_start.tzinfo is None:
+            window_start = window_start.replace(tzinfo=timezone.utc)
+        if window_end.tzinfo is None:
+            window_end = window_end.replace(tzinfo=timezone.utc)
+
+        start_utc = window_start.isoformat(timespec="seconds").replace("+00:00", "Z")
+        end_utc = window_end.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+        body["UpdatedUtc"] = {"StartUtc": start_utc, "EndUtc": end_utc}
+
+        self.logger.info(
+            "Querying source_assignments with UpdatedUtc: %s to %s", start_utc, end_utc
+        )
+
+        return body
+
+    def request_records(self, context: dict | None) -> Iterable[dict]:
+        """Skip the remaining partitions once Mews has denied the operation."""
+        if self._permission_denied:
+            return
+        yield from super().request_records(context)
+
+    def validate_response(self, response: requests.Response) -> None:
+        """Skip gracefully when Mews has not enabled the operation yet.
+
+        The Source assignments operation is in beta and permission-gated; until
+        Mews enables it the API returns HTTP 401 with "No permission to use this
+        operation.". Treat that specific case as an empty result so it does not
+        break the rest of the Mews sync. Genuine auth failures (e.g. an expired
+        session) still raise.
+        """
+        if response.status_code in (401, 403):
+            try:
+                message = response.json().get("Message", "")
+            except Exception:
+                message = ""
+            if "No permission to use this operation" in message:
+                if not self._permission_denied:
+                    self.logger.warning(
+                        "%s: Mews denied access to the Source assignments operation "
+                        "(beta). Ask Mews to enable 'sourceAssignments/getAll/2024-09-20' "
+                        "for this integration; skipping the stream.",
+                        self.name,
+                    )
+                self._permission_denied = True
+                return
+        super().validate_response(response)
 
 
 class CompaniesStream(MewsStream):

@@ -15,6 +15,7 @@ Singer tap for [Mews PMS API](https://mews-systems.gitbook.io/connector-api), bu
 | tax_environments    | /taxEnvironments/getAll         | Code        | None            | -                |
 | ledger_balances     | /ledgerBalances/getAll           | EnterpriseId, Date, LedgerType | Date | - |
 | sources             | /sources/getAll                  | Id          | UpdatedUtc      | -                |
+| source_assignments  | /sourceAssignments/getAll/2024-09-20 | Id      | UpdatedUtc      | -                |
 | companies           | /companies/getAll                | Id          | UpdatedUtc      | -                |
 | business_segments   | /businessSegments/getAll         | Id          | UpdatedUtc      | -                |
 | payment_requests    | /paymentRequests/getAll          | Id          | UpdatedUtc      | -                |
@@ -34,12 +35,13 @@ Singer tap for [Mews PMS API](https://mews-systems.gitbook.io/connector-api), bu
 | payments            | /payments/getAll                 | Id          | UpdatedUtc      | bills            |
 
 **Stream Hierarchy:**
-- `services`, `customers`, `reservations`, `rates`, `accounting_categories`, `taxations`, `tax_environments`, `ledger_balances`, `sources`, `companies`, `business_segments`, `payment_requests`, `availability_blocks`, and `resource_blocks` are independent parent streams
+- `services`, `customers`, `reservations`, `rates`, `accounting_categories`, `taxations`, `tax_environments`, `ledger_balances`, `sources`, `companies`, `business_segments`, `payment_requests`, `availability_blocks`, `source_assignments`, and `resource_blocks` are independent parent streams
 - `resource_categories`, `resources`, `products`, `rate_groups`, `restrictions`, `product_service_orders`, and `age_categories` are children of `services` (partitioned by ServiceId)
 - `resource_category_assignments` is a child of `resource_categories` (partitioned by ServiceId and category)
 - `companionships` and `order_items` are children of `reservations` (order items use reservation IDs as `ServiceOrderIds`)
 - `bills` is a child of `order_items`, and `payments` is a child of `bills`
 - `reservations`, `customers`, `payment_requests`, `availability_blocks`, `resource_blocks`, and `resource_category_assignments` use UpdatedUtc time interval filtering (max 3 months)
+- `source_assignments` uses UpdatedUtc time interval filtering (max 1 month). It is a beta, permission-gated Mews operation and is only exposed when `source_assignments_enabled` is set to `true`.
 - `taxations` and `tax_environments` are full-refresh reference streams because the Mews API does not expose incremental cursors or updated timestamps for these endpoints
 
 ## Installation
@@ -70,12 +72,15 @@ plugins:
 | start_date   | Yes      |                      | Start date for retrieving reservations (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ) |
 | enterprise_ids | No     |                      | List of Enterprise IDs to scope certain requests (e.g., rates, sources, payment_requests) |
 | ledger_types  | No      |                      | Ledger types for the `ledger_balances` stream (defaults to all known types)              |
+| source_assignments_enabled | No | false      | Include the `source_assignments` stream (Mews Source assignments, beta). Requires Mews to enable the operation for the integration. |
 | api_url      | No       | https://api.mews.com | Mews API base URL                                                            |
 | client_name  | No       | BBGMeltano 1.0.0     | Client identifier sent with API requests                                     |
 | progress_log_enabled | No | true               | Enable periodic progress logs (includes ETA for time-window streams)         |
 | progress_log_interval_seconds | No | 60          | Minimum seconds between progress log lines per stream                        |
 
-**Note:** The Mews API has a 3-month maximum for some time-window endpoints, and a 1-month maximum for `ledger_balances`. The tap partitions requests into allowed windows and uses state to continue from where it left off.
+**Note:** The Mews API has a 3-month maximum for some time-window endpoints, a 1-month maximum for `ledger_balances` and `source_assignments`. The tap partitions requests into allowed windows and uses state to continue from where it left off.
+
+**Note:** `source_assignments` maps reservations to their Source (booking engine, legacy Mews name "distributor"). It is the only way to tell which booking engine a direct (`Origin=Distributor`) reservation came from. The operation is in beta-test and must be enabled by Mews for the integration; until then the API returns "No permission to use this operation." and the stream logs a warning and returns no records. Set `source_assignments_enabled` to `true` once access is granted.
 
 ```bash
 meltano config tap-mews set client_token YOUR_CLIENT_TOKEN

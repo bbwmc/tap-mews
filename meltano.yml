@@ -41,6 +41,12 @@ plugins:
         - name: ledger_types
           kind: array
           description: Accounting ledger types to query in the ledger_balances stream
+        - name: source_assignments_enabled
+          kind: boolean
+          value: false
+          description: >-
+            Include the source_assignments stream (Mews Source assignments, beta).
+            Requires Mews to enable the sourceAssignments operation for the integration.
         - name: progress_log_enabled
           kind: boolean
           value: true
