@@ -1475,7 +1475,8 @@ class LedgerEntriesStream(MewsStream):
 
     name = "ledger_entries"
     path = "/ledgerEntries/getAll"
-    page_size = 100
+    # Use the API's maximum page size while retaining every daily partition.
+    page_size = 1000
     primary_keys = ("Id",)
     replication_key = "CreatedUtc"
     records_key = "LedgerEntries"
